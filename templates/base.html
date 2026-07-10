@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}デバッグ{% endblock %} — ヘキサうどん</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🔧%3C/text%3E%3C/svg%3E" />
+  <style>
+    :root {
+      --surface: #fcfcfb; --page: #f9f9f7; --text: #0b0b0b; --text-2: #52514e;
+      --muted: #898781; --border: rgba(11, 11, 11, 0.1); --accent: #2a78d6;
+      --ok: #008300; --warn: #b95000; --err: #d03b3b; --code-bg: #f1f0ec;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --surface: #1a1a19; --page: #0d0d0d; --text: #fff; --text-2: #c3c2b7;
+        --muted: #898781; --border: rgba(255, 255, 255, 0.1); --accent: #3987e5;
+        --ok: #21ba21; --warn: #e08b3d; --err: #e66767; --code-bg: #242423;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+      background: var(--page); color: var(--text); line-height: 1.55; font-size: 14px;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+      gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface);
+    }
+    header h1 { font-size: 1.05rem; }
+    header h1 .sub { color: var(--accent); font-weight: 600; }
+    nav { display: flex; gap: 4px; flex-wrap: wrap; }
+    nav a {
+      padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px;
+      color: var(--text-2); text-decoration: none; font-size: 0.82rem; background: var(--surface);
+    }
+    nav a:hover { border-color: var(--accent); color: var(--text); }
+    nav a.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    main { max-width: 1100px; margin: 0 auto; padding: 18px 20px 40px; }
+    section.card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 16px; margin-bottom: 14px;
+    }
+    section.card h2 { font-size: 0.95rem; margin-bottom: 8px; }
+    section.card h3 { font-size: 0.82rem; color: var(--muted); margin: 10px 0 4px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+    th, td { text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+    tr:last-child th, tr:last-child td { border-bottom: none; }
+    .kv th { width: 180px; }
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem; background: var(--code-bg); padding: 1px 5px; border-radius: 4px;
+      word-break: break-all;
+    }
+    .plan-code { display: block; white-space: pre-wrap; padding: 4px 8px; }
+    .muted { color: var(--muted); }
+    .ok { color: var(--ok); font-weight: 600; }
+    .warn { color: var(--warn); font-weight: 600; }
+    .err { color: var(--err); font-weight: 600; }
+    .chip { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: baseline; }
+    .map-svg { width: 100%; max-width: 760px; height: auto; display: block; background: #f4f3ef; border-radius: 8px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+    .btn {
+      display: inline-block; padding: 6px 14px; font-size: 0.83rem; cursor: pointer;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text);
+    }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    form.regen { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+    form.regen label { display: flex; flex-direction: column; gap: 2px; font-size: 0.72rem; color: var(--muted); }
+    form.regen input {
+      width: 84px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px;
+      background: var(--page); color: var(--text); font-size: 0.83rem;
+    }
+    .links a { color: var(--accent); margin-right: 14px; font-size: 0.82rem; }
+    .badge {
+      display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.72rem;
+      font-weight: 600; border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🔧 ヘキサうどん <span class="sub">サーバーデバッグ</span></h1>
+    <nav>
+      <a href="/debug" {% if nav == 'index' %}class="active"{% endif %}>概要</a>
+      {% for i in range(num_days) %}
+      <a href="/debug/day/{{ i }}" {% if nav == 'day' and nav_day == i %}class="active"{% endif %}>{{ i + 1 }}日目</a>
+      {% endfor %}
+      <a href="/debug/requests" {% if nav == 'requests' %}class="active"{% endif %}>リクエストログ</a>
+      <a href="/docs">API docs</a>
+      <a href="/">ビジュアライザ</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

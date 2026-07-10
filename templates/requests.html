@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}リクエストログ{% endblock %}
+{% block content %}
+
+<section class="card">
+  <h2>API リクエストログ（新しい順・最大200件・再起動で消去）</h2>
+  <p class="muted" style="margin-bottom:8px">
+    <label><input type="checkbox" id="auto-reload" /> 3秒ごとに自動更新</label>
+    　<button class="btn" onclick="location.reload()">今すぐ更新</button>
+  </p>
+  {% if entries %}
+  <table>
+    <tr><th>時刻</th><th>メソッド</th><th>パス</th><th>状態</th><th>時間</th><th>リクエストボディ</th><th>レスポンスボディ</th></tr>
+    {% for e in entries %}
+    <tr>
+      <td class="mono" style="white-space:nowrap">{{ e.time_str }}</td>
+      <td><span class="badge">{{ e.method }}</span></td>
+      <td><code>{{ e.path }}{% if e.query %}?{{ e.query }}{% endif %}</code></td>
+      <td>
+        {% if e.status is none %}<span class="err">中断</span>
+        {% elif e.status < 400 %}<span class="ok">{{ e.status }}</span>
+        {% else %}<span class="err">{{ e.status }}</span>{% endif %}
+      </td>
+      <td class="mono" style="white-space:nowrap">{{ e.duration_ms }} ms</td>
+      <td>{% if e.request_body %}<code class="plan-code">{{ e.request_body }}</code>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{% if e.response_body %}<code class="plan-code">{{ e.response_body }}</code>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">まだ記録がありません。<code>/api/...</code> へのリクエストがここに表示されます。
+    競技プログラム（クライアント）の送信内容と、サーバーの検証結果（422 の理由など）の確認に使えます。</p>
+  {% endif %}
+</section>
+
+<script>
+  const box = document.getElementById('auto-reload');
+  box.checked = sessionStorage.getItem('dbg-auto-reload') === '1';
+  box.addEventListener('change', () => {
+    sessionStorage.setItem('dbg-auto-reload', box.checked ? '1' : '0');
+    if (box.checked) location.reload();
+  });
+  if (box.checked) setTimeout(() => location.reload(), 3000);
+</script>
+{% endblock %}

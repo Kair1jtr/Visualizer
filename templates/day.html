@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ day + 1 }}日目{% endblock %}
+{% block content %}
+
+<section class="card">
+  <h2>{{ day + 1 }}日目（day={{ day }}）</h2>
+  <div class="grid-2">
+    <table class="kv">
+      <tr><th>endsAt</th><td>{{ ends_at_str }}（<code>{{ info.endsAt }}</code>）</td></tr>
+      <tr><th>daySteps</th><td>{{ day_steps }} ステップ</td></tr>
+      <tr><th>daySeconds（回答制限）</th><td>{{ day_seconds }} 秒</td></tr>
+    </table>
+    <table class="kv">
+      <tr><th>道路セル数</th><td>{{ road_total }}</td></tr>
+      <tr><th>混雑 (status=1)</th><td>{{ busy_cells | length }}{% if busy_cells %} — <code>{{ busy_cells | join(', ') }}</code>{% endif %}</td></tr>
+      <tr><th>渋滞 (status=2)</th><td>{{ jammed_cells | length }}{% if jammed_cells %} — <code>{{ jammed_cells | join(', ') }}</code>{% endif %}</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>盤面（この日の開始時点）</h2>
+  {{ svg | safe }}
+  <p class="muted" style="margin-top:6px">オレンジ破線リング=混雑、赤リング=渋滞。エージェントの位置・燃料は各日開始時の試合情報（info）の値。</p>
+</section>
+
+{% for team in teams %}
+<section class="card">
+  <h2><span class="chip" style="background:{{ team.color }}"></span>{{ team.name }}（id={{ team.id }}）</h2>
+  <table>
+    <tr>
+      <th>#</th><th>種別 (kind)</th><th>開始位置 pos (行,列)</th><th>燃料 fuel</th>
+      <th>行動計画（-n=待機n / 0〜5=方向）</th><th>トレース結果</th>
+    </tr>
+    {% for a in team.agents %}
+    <tr>
+      <td>{{ loop.index0 }}</td>
+      <td>{{ a.kind_name }}</td>
+      <td><code>{{ a.pos }}</code> <span class="muted">({{ a.row }},{{ a.col }})</span></td>
+      <td>{{ a.fuel }} / {{ fuel_limit }}</td>
+      <td><code class="plan-code">{{ a.plan_text }}</code></td>
+      <td>
+        {% if a.trace.error %}
+          <span class="err">✗ {{ a.trace.error }}</span>
+        {% elif a.trace.total == day_steps %}
+          <span class="ok">✓ {{ a.trace.total }} ステップ</span><br>
+          <span class="muted">到達 <code>{{ a.trace.cell }}</code></span>
+        {% else %}
+          <span class="warn">△ {{ a.trace.total }} ≠ {{ day_steps }} ステップ</span><br>
+          <span class="muted">到達 <code>{{ a.trace.cell }}</code></span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endfor %}
+
+<section class="card">
+  <h2>生データ</h2>
+  <p class="links">
+    <a href="/api/match/{{ day }}">GET /api/match/{{ day }}（この日の試合情報）</a>
+    {% if day > 0 %}<a href="/debug/day/{{ day - 1 }}">← {{ day }}日目</a>{% endif %}
+    {% if day + 1 < num_days %}<a href="/debug/day/{{ day + 1 }}">{{ day + 2 }}日目 →</a>{% endif %}
+  </p>
+</section>
+{% endblock %}

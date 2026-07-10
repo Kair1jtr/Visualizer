@@ -33,6 +33,21 @@ uvicorn app:app --http h11
 
 FastAPI の自動ドキュメントは http://127.0.0.1:8000/docs で確認できます。
 
+## サーバーデバッグ GUI (`/debug`)
+
+サーバーが内部に保持している試合データと API の入出力を、ブラウザから
+そのまま確認できるデバッグ画面（FastAPI + Jinja2 のサーバーサイド描画）です。
+
+| パス | 内容 |
+|---|---|
+| `GET /debug` | 試合サマリ（seed・チーム・daySteps・閾値など）、マップ SVG、スポット一覧、サーバー計算の最終結果 (`meta.expected`)、再生成フォーム |
+| `GET /debug/day/{n}` | 各日の試合情報（endsAt・道路状態の内訳）、開始時点の盤面 SVG、全チームのエージェント（位置・燃料）と**行動計画のトレース**（ステップ合計が daySteps と一致するかの検算・到達セル） |
+| `GET /debug/requests` | 直近200件の `/api/*` リクエストログ（メソッド・状態・所要時間・リクエスト/レスポンスボディ）。競技クライアントが送った回答と 422 の理由の確認に便利 |
+
+- セルにマウスを乗せると番号・地形・道路状態、エージェントはチーム・種別・燃料を表示します。
+- リクエストログは純 ASGI ミドルウェア（`visualizer/debugview.py`）で記録し、
+  メモリ上（最大200件）にのみ保持します。
+
 ## ビジュアライザ用データ形式 (`hexaudon-official-v1`)
 
 `GET /api/replay` と「JSONを読込」ボタンは、公式フォーマットの文書を束ねた
@@ -84,12 +99,15 @@ FastAPI の自動ドキュメントは http://127.0.0.1:8000/docs で確認で�
 ## 構成
 
 ```
-app.py                     FastAPI サーバー（公式フォーマット API + 静的配信）
+app.py                     FastAPI サーバー（公式フォーマット API + デバッグ GUI + 静的配信）
 visualizer/
   hexgrid.py               六角形グリッド（odd-r）座標・方向コード変換
   pathfinding.py           地形コスト付き Dijkstra
   mapgen.py                マップ自動生成（連結性保証つき）
   simulator.py             貪欲AI同士のサンプル試合生成（公式フォーマット出力）
+  debugview.py             デバッグ GUI 用: SVG 描画・計画トレース・API ログ記録
+templates/
+  base.html ほか           デバッグ GUI（Jinja2: 概要 / 日別 / リクエストログ）
 static/
   index.html / style.css   UI（ライト/ダーク対応）
   js/replay.js             公式データからの試合再生エンジン
