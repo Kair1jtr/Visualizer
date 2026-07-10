@@ -27,6 +27,7 @@ from fastapi.templating import Jinja2Templates
 
 from visualizer import debugview
 from visualizer.hexgrid import apply_direction
+from visualizer.livematch import LiveError, LiveMatch
 from visualizer.simulator import generate_sample_match
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -40,12 +41,15 @@ app.add_middleware(debugview.ApiLogMiddleware)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 _lock = Lock()
-_current: dict | None = None  # 現在の試合データ（bundle）
+_current: dict | None = None  # サンプルモードの試合データ（bundle）
+_live: LiveMatch | None = None  # ライブ対戦モードの試合（非 None ならライブモード）
 
 
 def _get_current() -> dict:
     global _current
     with _lock:
+        if _live is not None:
+            return _live.bundle()
         if _current is None:
             _current = generate_sample_match()
         return _current
@@ -60,8 +64,11 @@ def new_match(
     width: int = Query(12, ge=8, le=32, description="マップ横セル数（ルール上 8〜32）"),
     height: int = Query(10, ge=8, le=32, description="マップ縦セル数（ルール上 8〜32）"),
 ):
-    """新しいサンプル試合を生成して現在の試合として保持する。"""
-    global _current
+    """新しいサンプル試合を生成して現在の試合として保持する。
+
+    ライブ対戦中に呼ぶとライブ試合は破棄され、サンプルモードに戻る。
+    """
+    global _current, _live
     try:
         bundle = generate_sample_match(
             seed=seed,
@@ -75,7 +82,56 @@ def new_match(
         raise HTTPException(status_code=422, detail=f"試合生成に失敗しました: {exc}")
     with _lock:
         _current = bundle
+        _live = None
     return {"ok": True, "seed": bundle["meta"]["seed"]}
+
+
+# ----- ライブ対戦モード -----
+
+
+@app.post("/api/live/new")
+def live_new(
+    seed: int | None = Query(None, description="乱数シード（省略時はランダム）"),
+    teams: int = Query(3, ge=2, le=6, description="チーム数（チーム0=プレイヤー、他はAI）"),
+    days: int = Query(5, ge=4, le=10, description="日数（ルール上 4〜10）"),
+    agents: int = Query(4, ge=3, le=8, description="1チームのエージェント数（ルール上 3〜8）"),
+    width: int = Query(12, ge=8, le=32, description="マップ横セル数（ルール上 8〜32）"),
+    height: int = Query(10, ge=8, le=32, description="マップ縦セル数（ルール上 8〜32）"),
+):
+    """ライブ対戦を開始する。
+
+    チーム0があなた（クライアント）、他チームは内蔵AI。以降の流れ:
+    1. GET  /api/match       でマップ構成を取得
+    2. POST /api/agents      でエージェント種別を提出（試合開始）
+    3. GET  /api/match/{day} で当日の試合情報を取得
+    4. POST /api/actions?day={day} で行動計画を提出 → その日が実行され翌日へ
+    5. 3〜4 を最終日まで繰り返し。経過は GET /api/live・GET /api/replay で確認
+    """
+    global _live
+    try:
+        match = LiveMatch(
+            seed=seed,
+            num_teams=teams,
+            num_days=days,
+            num_agents=agents,
+            width=width,
+            height=height,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"試合生成に失敗しました: {exc}")
+    with _lock:
+        _live = match
+    return {"ok": True, "seed": match.sim.seed, "status": match.status,
+            "message": "POST /api/agents でエージェント種別を提出すると試合が始まります"}
+
+
+@app.get("/api/live")
+def live_status():
+    """ライブ対戦の進行状況（ライブモードでなければ live: false）。"""
+    with _lock:
+        if _live is None:
+            return {"live": False, "status": "sample"}
+        return _live.summary()
 
 
 @app.get("/api/match")
@@ -86,7 +142,16 @@ def match_config():
 
 @app.get("/api/match/{day}")
 def match_day_info(day: int):
-    """各日開始時の試合情報フォーマット（公式）を返す。day は 0 始まり。"""
+    """各日開始時の試合情報フォーマット（公式）を返す。day は 0 始まり。
+
+    ライブ対戦中は「過去の日〜現在受付中の日」のみ取得できる。
+    """
+    with _lock:
+        if _live is not None:
+            try:
+                return _live.day_info(day)
+            except LiveError as exc:
+                raise HTTPException(status_code=409, detail=exc.detail)
     bundle = _get_current()
     if not 0 <= day < len(bundle["days"]):
         raise HTTPException(status_code=404, detail=f"day は 0〜{len(bundle['days']) - 1}")
@@ -102,11 +167,7 @@ def replay_bundle():
 # ----- 回答の受付・検証（公式回答フォーマット） -----
 
 
-@app.post("/api/agents")
-def submit_agent_kinds(kinds: list = Body(...)):
-    """エージェント種別の回答を検証する。例: [0, 1, 0, 1]"""
-    bundle = _get_current()
-    num_agents = len(bundle["match"]["agents"])
+def _validate_kinds(kinds: list, num_agents: int):
     if not isinstance(kinds, list) or len(kinds) != num_agents:
         raise HTTPException(
             status_code=422,
@@ -114,28 +175,17 @@ def submit_agent_kinds(kinds: list = Body(...)):
         )
     if not all(isinstance(k, int) and k in (0, 1) for k in kinds):
         raise HTTPException(status_code=422, detail="種別は 0（巡回車）か 1（補給車）のみ")
-    return {"accepted": True}
 
 
-@app.post("/api/actions")
-def submit_actions(
-    plans: list = Body(...),
-    day: int = Query(0, ge=0, description="対象の日（0 始まり）"),
-):
-    """行動計画の回答を検証する。
+def _validate_plans(plans: list, match: dict, info: dict, day_steps: int):
+    """行動計画の回答を公式仕様に沿って検証する（不正なら HTTPException 422）。
 
-    公式仕様に沿って以下を確認する:
     - 全エージェント分の行動列があること
     - 値は -1 以下（待機）または 0〜5（方向）であること
     - 各エージェントの行動計画のステップ合計が当日のステップ数と一致すること
     - 池・マップ外への移動が含まれないこと
     ※ 燃料・補給のシミュレーションまでは行わない（フォーマット検証のみ）
     """
-    bundle = _get_current()
-    match = bundle["match"]
-    if not 0 <= day < len(match["daySteps"]):
-        raise HTTPException(status_code=404, detail=f"day は 0〜{len(match['daySteps']) - 1}")
-
     num_agents = len(match["agents"])
     if not isinstance(plans, list) or len(plans) != num_agents:
         raise HTTPException(
@@ -146,13 +196,12 @@ def submit_actions(
     width = match["map"]["width"]
     height = match["map"]["height"]
     cells = match["map"]["cells"]
-    day_steps = match["daySteps"][day]
     # 状態別の道路ステップ数はその日の交通量に依存するため、
-    # ここでは当日の試合情報の traffics を参照する
-    traffics = {t["pos"]: t["status"] for t in bundle["days"][day]["info"]["traffics"]}
+    # 当日の試合情報の traffics を参照する
+    traffics = {t["pos"]: t["status"] for t in info["traffics"]}
     step_cost = {0: 2, 1: None, 2: 3, 3: None}  # 地形コード → ステップ（道路は状態依存）
     road_step = {0: 1, 1: 2, 2: 4}
-    positions = [a["pos"] for a in bundle["days"][day]["info"]["agents"]]
+    positions = [a["pos"] for a in info["agents"]]
 
     for ai, plan in enumerate(plans):
         if not isinstance(plan, list) or not plan:
@@ -184,6 +233,73 @@ def submit_actions(
                 status_code=422,
                 detail=f"エージェント{ai}: ステップ合計 {total} が当日のステップ数 {day_steps} と不一致",
             )
+
+
+@app.post("/api/agents")
+def submit_agent_kinds(kinds: list = Body(...)):
+    """エージェント種別の回答。例: [0, 1, 0, 1]
+
+    サンプルモードでは検証のみ。ライブ対戦中はプレイヤー（チーム0）の
+    種別として確定し、試合が始まる。
+    """
+    with _lock:
+        if _live is not None:
+            _validate_kinds(kinds, len(_live.sim.map["starts"]))
+            try:
+                _live.submit_kinds(kinds)
+            except LiveError as exc:
+                raise HTTPException(status_code=409, detail=exc.detail)
+            return {"accepted": True, "status": _live.status,
+                    "message": "試合開始。GET /api/match/0 で初日の情報を取得してください"}
+    bundle = _get_current()
+    _validate_kinds(kinds, len(bundle["match"]["agents"]))
+    return {"accepted": True}
+
+
+@app.post("/api/actions")
+def submit_actions(
+    plans: list = Body(...),
+    day: int = Query(0, ge=0, description="対象の日（0 始まり）"),
+):
+    """行動計画の回答。
+
+    サンプルモードでは検証のみ。ライブ対戦中はプレイヤー（チーム0）の
+    当日の行動として実行され、AIチームと共にその日が進行して翌日へ移る。
+    """
+    with _lock:
+        if _live is not None:
+            if _live.status == "waiting_agents":
+                raise HTTPException(
+                    status_code=409,
+                    detail="先に POST /api/agents でエージェント種別を提出してください",
+                )
+            if _live.status == "finished":
+                raise HTTPException(
+                    status_code=409,
+                    detail="試合は終了しています（POST /api/live/new で新しい試合を開始）",
+                )
+            if day != _live.current_day:
+                raise HTTPException(
+                    status_code=409, detail=f"現在回答を受付中の日は {_live.current_day} です"
+                )
+            match = _live.bundle()["match"]
+            _validate_plans(plans, match, _live.pending_info, match["daySteps"][day])
+            try:
+                _live.submit_actions(day, plans)
+            except LiveError as exc:
+                raise HTTPException(status_code=409, detail=exc.detail)
+            return {
+                "accepted": True,
+                "day": day,
+                "finished": _live.finished,
+                "standings": _live.standings(),
+            }
+
+    bundle = _get_current()
+    match = bundle["match"]
+    if not 0 <= day < len(match["daySteps"]):
+        raise HTTPException(status_code=404, detail=f"day は 0〜{len(match['daySteps']) - 1}")
+    _validate_plans(plans, match, bundle["days"][day]["info"], match["daySteps"][day])
     return {"accepted": True}
 
 
@@ -206,6 +322,8 @@ def _team_agents_for_day(bundle: dict, day: int) -> list[list[dict]]:
 @app.get("/debug", response_class=HTMLResponse, include_in_schema=False)
 def debug_index(request: Request):
     """試合サマリ・マップ・スポット・期待スコアの一覧。"""
+    with _lock:
+        live = _live.summary() if _live is not None else None
     bundle = _get_current()
     match = bundle["match"]
     meta = bundle["meta"]
@@ -234,7 +352,8 @@ def debug_index(request: Request):
         match,
         series_names=series_names,
         team_names=meta["teamNames"],
-        team_agents=_team_agents_for_day(bundle, 0),
+        # ライブ試合でまだ1日も完了していない場合は初期配置のみ表示
+        team_agents=_team_agents_for_day(bundle, 0) if bundle["days"] else None,
     )
     return templates.TemplateResponse(
         request=request,
@@ -248,6 +367,7 @@ def debug_index(request: Request):
             "spot_rows": spot_rows,
             "ranking_rows": ranking_rows,
             "svg": svg,
+            "live": live,
         },
     )
 

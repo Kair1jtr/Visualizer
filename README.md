@@ -31,9 +31,35 @@ uvicorn app:app --http h11
 | `POST /api/agents` | **エージェント種別の回答**（例 `[0,1,0,1]`）を公式仕様どおり検証 |
 | `POST /api/actions?day=N` | **行動計画の回答**を検証（-1以下=待機 / 0〜5=方向。0:左上→時計回り。ステップ合計の一致・池/マップ外への移動を確認） |
 | `POST /api/new?seed=&teams=&days=&agents=&width=&height=` | 新しいサンプル試合を生成 |
+| `POST /api/live/new?seed=&teams=&…` | **ライブ対戦を開始**（チーム0=あなた、他=内蔵AI。下記） |
+| `GET /api/live` | ライブ対戦の進行状況（状態・受付中の日・暫定順位） |
 | `GET /api/replay` | ビジュアライザ用の試合データ一式（下記） |
 
 FastAPI の自動ドキュメントは http://127.0.0.1:8000/docs で確認できます。
+
+## ライブ対戦モード（自作プログラムで対戦）
+
+`POST /api/live/new` で始まるライブ対戦では、`POST /api/actions` が検証だけで
+なく**実際にその日を実行**します。チーム0があなたのプログラム、他チームは
+内蔵の貪欲AIです。
+
+```
+POST /api/live/new            試合開始（マップ生成）
+GET  /api/match               マップ構成を取得
+POST /api/agents              種別を提出 → 試合開始
+┌─ 日ごとに繰り返し ─────────────────┐
+│ GET  /api/match/{day}        当日の試合情報（位置・燃料・道路状態）│
+│ POST /api/actions?day={day}  行動計画を提出 → その日が実行される  │
+└──────────────────────────────┘
+GET  /api/replay              全記録（ビジュアライザで観戦可能）
+```
+
+- 手順を誤ると `409`（理由付き）、計画が不正だと `422` が返ります。
+- 実行中の燃料切れの移動は「補給されるまで待機」として扱われ、
+  実際に実行された行動が記録されます。
+- 途中経過も「**現在の試合を表示**」ボタンやデバッグ GUI でいつでも確認できます。
+- 対戦クライアントの実装例: `python examples/client.py --seed 42`
+  （通信手順と行動計画の組み立て方の見本。貪欲戦略で全日程を自動プレイ）
 
 ## サーバーデバッグ GUI (`/debug`)
 
@@ -106,10 +132,13 @@ visualizer/
   hexgrid.py               六角形グリッド（odd-r）座標・方向コード変換
   pathfinding.py           地形コスト付き Dijkstra
   mapgen.py                マップ自動生成（連結性保証つき）
-  simulator.py             貪欲AI同士のサンプル試合生成（公式フォーマット出力）
+  simulator.py             試合シミュレータ（AI/外部プラン実行・公式フォーマット出力）
+  livematch.py             ライブ対戦の進行管理（種別→行動計画→日実行）
   debugview.py             デバッグ GUI 用: SVG 描画・計画トレース・API ログ記録
 templates/
   base.html ほか           デバッグ GUI（Jinja2: 概要 / 日別 / リクエストログ）
+examples/
+  client.py                ライブ対戦のサンプルクライアント（貪欲戦略）
 static/
   index.html / style.css   UI（ライト/ダーク対応）
   js/replay.js             公式データからの試合再生エンジン

@@ -68,9 +68,28 @@ async function loadSample() {
   }
 }
 
+// 再生成せずにサーバーが保持している現在の試合を表示（ライブ対戦の観戦用）
+async function loadCurrent() {
+  const btn = $('btn-reload');
+  btn.disabled = true;
+  try {
+    const res = await fetch('./api/replay');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    setMatch(await res.json());
+  } catch (err) {
+    alert(`試合データの取得に失敗しました: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function setMatch(bundle) {
   if (bundle.format !== 'hexaudon-official-v1' || !bundle.match || !bundle.days) {
     alert('対応していないデータ形式です（hexaudon-official-v1 が必要）');
+    return;
+  }
+  if (!bundle.days.length) {
+    alert('まだ完了した日がありません（ライブ対戦で行動計画を提出すると1日ずつ増えます）');
     return;
   }
   state.replay = buildReplay(bundle);
@@ -85,6 +104,7 @@ function setMatch(bundle) {
 }
 
 $('btn-sample').addEventListener('click', loadSample);
+$('btn-reload').addEventListener('click', loadCurrent);
 $('file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;

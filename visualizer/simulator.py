@@ -21,7 +21,7 @@
 import random
 import time
 
-from .hexgrid import direction_code
+from .hexgrid import apply_direction, direction_code
 from .mapgen import generate_map
 from .pathfinding import (
     FUEL_COST,
@@ -49,6 +49,28 @@ def _compress_waits(actions: list[int]) -> list[int]:
         else:
             out.append(a)
     return out
+
+
+class _PlanCursor:
+    """公式の行動計画（-N=待機N / 0〜5=方向）を1コマンドずつ取り出す。"""
+
+    def __init__(self, plan: list[int]):
+        self.queue: list[int] = []
+        for value in plan:
+            if value <= -1:
+                self.queue.extend([-1] * (-value))
+            else:
+                self.queue.append(value)
+        self.index = 0
+
+    def peek(self) -> int | None:
+        return self.queue[self.index] if self.index < len(self.queue) else None
+
+    def take(self) -> int | None:
+        value = self.peek()
+        if value is not None:
+            self.index += 1
+        return value
 
 
 class _Agent:
@@ -131,6 +153,8 @@ class MatchSimulator:
             t += 30
         self.traffic_history: list[dict[int, int]] = []
         self.days = []
+        # begin_day で確定し execute_day で消費する「進行中の日」の状態
+        self._pending: tuple[int, dict[int, str], dict] | None = None
 
     # ----- 地形・コスト -----
 
@@ -265,10 +289,25 @@ class MatchSimulator:
             ],
         }
 
-    def _run_day(self, day_index: int):
-        steps = self.day_steps[day_index]
+    def set_team_kinds(self, team_index: int, kinds: list[int]):
+        """チームのエージェント種別を差し替える（試合開始前=初日開始前のみ）。"""
+        if self.days or self._pending is not None:
+            raise ValueError("種別の変更は試合開始前のみ可能です")
+        team = self.teams[team_index]
+        team.agents = [
+            _Agent(
+                "supply" if k == KIND_CODE["supply"] else "patrol",
+                start,
+                None if k == KIND_CODE["supply"] else self.fuel_capacity,
+            )
+            for k, start in zip(kinds, self.map["starts"])
+        ]
+
+    def begin_day(self, day_index: int) -> dict:
+        """日の開始処理（在庫補充・計画リセット）を行い、公式の試合情報を返す。"""
+        if day_index != len(self.days):
+            raise ValueError("日は完了した日の次から順番に開始する必要があります")
         road_states = self._road_states_for_day(day_index)
-        key_of = self._key_of(road_states)
 
         # 日初期化: 在庫補充・獲得履歴/計画リセット
         for team in self.teams:
@@ -284,6 +323,53 @@ class MatchSimulator:
 
         # 日開始時点の試合情報（公式フォーマット）をここで確定
         info = self._day_info(day_index, road_states)
+        self._pending = (day_index, road_states, info)
+        return info
+
+    def _step_external(self, cursor, agent, key_of, steps_left, terrain) -> int | None:
+        """外部提出プランの1コマンドを処理し、移動を開始したら方向コードを返す。
+
+        燃料不足・日内に完了しない移動は待機し、プランは進めない
+        （補給後・翌ステップに再試行される）。不正な移動先は読み飛ばす。
+        """
+        value = cursor.peek()
+        if value is None:
+            return None  # プラン消化済み → 待機
+        if value == -1:
+            cursor.take()
+            return None  # 計画どおりの待機
+        key = key_of(agent.cell)
+        if agent.kind == "patrol" and agent.fuel < FUEL_COST[key]:
+            return None  # 燃料不足 → 補給されるまで待機（コマンドは保留）
+        if steps_left < STEP_COST[key]:
+            return None  # 日内に完了しない移動 → 待機
+        target = apply_direction(agent.cell, value, self.width, self.height)
+        if target is None or terrain[target] == "pond":
+            cursor.take()
+            return None  # 不正な移動（受付時の検証で通常は弾かれる）→ 無視
+        cursor.take()
+        if agent.kind == "patrol":
+            agent.fuel -= FUEL_COST[key]
+        agent.move_remaining = STEP_COST[key]
+        agent.move_target = target
+        return value
+
+    def execute_day(self, external_plans: dict[int, list[list[int]]] | None = None):
+        """begin_day 済みの日を実行する。
+
+        external_plans: チーム番号 → 公式行動計画（エージェントごと）。
+        指定されたチームは AI ではなく提出プランに従って行動する。
+        """
+        if self._pending is None:
+            raise ValueError("begin_day が呼ばれていません")
+        day_index, road_states, info = self._pending
+        self._pending = None
+        steps = self.day_steps[day_index]
+        key_of = self._key_of(road_states)
+        cursors = {
+            ti: [_PlanCursor(plan) for plan in plans]
+            for ti, plans in (external_plans or {}).items()
+        }
 
         # 各エージェントの行動記録（公式の行動計画フォーマットに変換する）
         actions = [[[] for _ in team.agents] for team in self.teams]
@@ -298,10 +384,17 @@ class MatchSimulator:
 
             # 行動決定・移動命令
             for ti, team in enumerate(self.teams):
+                team_cursors = cursors.get(ti)
                 for ai, agent in enumerate(team.agents):
                     if agent.move_remaining > 0:
                         continue
-                    if agent.kind == "patrol":
+                    if team_cursors is not None:
+                        code = self._step_external(
+                            team_cursors[ai], agent, key_of, steps_left, terrain
+                        )
+                        if code is not None:
+                            actions[ti][ai].append(code)
+                    elif agent.kind == "patrol":
                         if agent.waiting_fuel:
                             continue
                         if agent.target_spot is not None and (
@@ -414,8 +507,15 @@ class MatchSimulator:
 
     def run(self) -> dict:
         for d in range(len(self.day_steps)):
-            self._run_day(d)
+            self.begin_day(d)
+            self.execute_day()
+        return self.bundle()
 
+    def bundle(self) -> dict:
+        """現在までの試合データ一式（公式フォーマットの集合）を返す。
+
+        ライブ試合では日が進むごとに days が伸びる（途中経過でも呼べる）。
+        """
         per_team = []
         for team in self.teams:
             per_team.append(

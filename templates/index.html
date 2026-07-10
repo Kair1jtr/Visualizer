@@ -2,6 +2,18 @@
 {% block title %}概要{% endblock %}
 {% block content %}
 
+{% if live %}
+<section class="card">
+  <h2>ライブ対戦 <span class="badge">{{ live.status }}</span></h2>
+  <table class="kv">
+    <tr><th>進行</th><td>{{ live.day + 1 }} / {{ live.numDays }} 日目 — {{ live.message }}</td></tr>
+    <tr><th>暫定順位</th><td>
+      {% for s in live.standings %}{{ s.rank }}位 {{ s.name }}（{{ s.seriesCount }}種/累積{{ s.dailySeriesCum }}/{{ s.totalUdon }}玉）{% if not loop.last %} ／ {% endif %}{% endfor %}
+    </td></tr>
+  </table>
+</section>
+{% endif %}
+
 <section class="card">
   <h2>試合サマリ</h2>
   <div class="grid-2">
