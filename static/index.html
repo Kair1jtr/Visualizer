@@ -4,7 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ヘキサうどん Visualizer</title>
-  <link rel="stylesheet" href="/src/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍜%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <div id="app">
@@ -14,10 +15,10 @@
         <p class="tagline">第37回全国高等専門学校プログラミングコンテスト 競技部門</p>
       </div>
       <div class="app-actions">
-        <button id="btn-load-sample" class="btn">サンプル試合を読込</button>
-        <label class="btn btn-file">
-          試合データを読込 (JSON)
-          <input type="file" id="file-input" accept="application/json" hidden />
+        <button id="btn-sample" class="btn btn-primary">サンプル試合を生成</button>
+        <label class="btn">
+          JSONを読込
+          <input type="file" id="file-input" accept="application/json,.json" hidden />
         </label>
       </div>
     </header>
@@ -35,50 +36,53 @@
         <div class="board-wrap" id="board-wrap">
           <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
           <div id="tooltip" class="tooltip hidden"></div>
+          <div id="board-empty" class="board-empty">
+            <p>「サンプル試合を生成」を押すか、試合ログJSONを読み込んでください。</p>
+          </div>
         </div>
         <div class="playback-bar">
           <button id="btn-play" class="btn btn-icon" title="再生 / 一時停止">▶</button>
-          <input type="range" id="step-slider" min="0" max="0" value="0" step="1" />
-          <div class="step-readout">
-            <span id="step-label">Day - / Step -</span>
-          </div>
+          <input type="range" id="step-slider" min="0" max="0" value="0" step="1" disabled />
+          <div class="step-readout" id="step-label">- / -</div>
           <select id="speed-select" title="再生速度">
-            <option value="500">0.5×</option>
-            <option value="250" selected>1×</option>
-            <option value="120">2×</option>
-            <option value="60">4×</option>
+            <option value="400">0.5×</option>
+            <option value="200" selected>1×</option>
+            <option value="100">2×</option>
+            <option value="50">4×</option>
           </select>
         </div>
+        <div class="event-ticker" id="event-ticker"></div>
       </section>
 
       <aside class="side-panel">
-        <section class="panel-block" id="legend-block">
-          <h2>凡例</h2>
-          <div id="legend-content"></div>
-        </section>
-
-        <section class="panel-block" id="scoreboard-block">
+        <section class="panel-block">
           <h2>スコア</h2>
-          <div id="scoreboard-content"></div>
+          <p class="hint">行をクリックすると盤面の在庫表示がそのチーム視点になります。</p>
+          <div id="scoreboard"></div>
         </section>
 
-        <section class="panel-block" id="inspector-block">
+        <section class="panel-block">
           <h2>詳細</h2>
-          <div id="inspector-content">
-            <p class="muted">マップ上のセル・エージェントをクリックすると詳細が表示されます。</p>
+          <div id="inspector">
+            <p class="muted">セルやエージェントをクリックすると詳細を表示します。</p>
           </div>
+        </section>
+
+        <section class="panel-block">
+          <h2>凡例</h2>
+          <div id="legend"></div>
         </section>
       </aside>
     </main>
 
     <footer class="app-footer">
       <p>
-        本ツールは公式の通信プロトコル公開前の非公式ビジュアライザです。データ形式は
-        <code>README.md</code> を参照してください。
+        非公式ビジュアライザ（公式プロトコル公開前の暫定データ形式）。形式仕様は
+        <code>README.md</code> を参照。
       </p>
     </footer>
   </div>
 
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>
