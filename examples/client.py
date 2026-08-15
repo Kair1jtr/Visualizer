@@ -172,7 +172,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--server", default="http://127.0.0.1:8000")
     ap.add_argument("--seed", type=int, default=None, help="試合の乱数シード")
-    ap.add_argument("--teams", type=int, default=3)
+    ap.add_argument("--teams", type=int, default=1, help="1=他プレイヤーなしの1人プレイ（既定）、2以上でAIチームと対戦")
     ap.add_argument("--days", type=int, default=5)
     ap.add_argument("--agents", type=int, default=4)
     args = ap.parse_args()

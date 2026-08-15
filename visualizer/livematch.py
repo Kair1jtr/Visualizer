@@ -1,6 +1,7 @@
 """ライブ対戦モードの試合進行管理。
 
-チーム0 = プレイヤー（外部クライアント）、他チーム = 内蔵の貪欲AI。
+チーム0 = プレイヤー（外部クライアント）。既定では他チームを一切生成しない
+1人プレイ（teams=1）。teams を2以上にすると内蔵の貪欲AIチームが加わる。
 公式フォーマットの回答（エージェント種別・行動計画）を受け取るたびに
 シミュレーションを1日ずつ進める。
 
@@ -30,7 +31,7 @@ class LiveMatch:
     def __init__(
         self,
         seed: int | None = None,
-        num_teams: int = 3,
+        num_teams: int = 1,
         num_days: int = 5,
         num_agents: int = 4,
         width: int = 12,
@@ -112,6 +113,10 @@ class LiveMatch:
             for rank, ti in enumerate(expected["ranking"])
         ]
 
+    @property
+    def solo(self) -> bool:
+        return len(self.sim.teams) == 1
+
     def summary(self) -> dict:
         """GET /api/live 用の進行状況。"""
         out = {
@@ -121,6 +126,7 @@ class LiveMatch:
             "day": min(self.current_day, self.num_days - 1),
             "numDays": self.num_days,
             "playerTeam": PLAYER_TEAM,
+            "solo": self.solo,
             "standings": self.standings(),
         }
         if self.status == "waiting_agents":

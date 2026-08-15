@@ -194,12 +194,12 @@
 
 ### 2.7 ライブ対戦モード（本リポジトリ独自）
 
-`POST /api/actions` を「検証のみ」から「実際の試合進行」に変えるモード。チーム0=クライアント（プレイヤー）、他チーム=内蔵AI。
+`POST /api/actions` を「検証のみ」から「実際の試合進行」に変えるモード。チーム0=クライアント（プレイヤー）。既定の `teams=1` では**他チームを一切生成しない1人プレイ**（他プレイヤーとは無関係に自分の巡回のみ）。`teams` を2以上にすると内蔵の貪欲AIチームが加わり順位を競う。
 
 | メソッド/パス | 内容 |
 |---|---|
-| `POST /api/live/new` | ライブ対戦を開始（クエリパラメータは `/api/new` と同じ） |
-| `GET /api/live` | 進行状況: `status`（`waiting_agents` / `waiting_actions` / `finished`）、受付中の `day`、暫定順位 `standings` |
+| `POST /api/live/new?teams=1&…` | ライブ対戦を開始（`teams` 以外のクエリパラメータは `/api/new` と同じ。`teams` の既定値は `1`、範囲は 1〜6） |
+| `GET /api/live` | 進行状況: `status`（`waiting_agents` / `waiting_actions` / `finished`）、受付中の `day`、`solo`（1人プレイか）、成績/暫定順位 `standings` |
 
 進行フロー:
 

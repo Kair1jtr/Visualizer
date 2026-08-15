@@ -92,7 +92,7 @@ def new_match(
 @app.post("/api/live/new")
 def live_new(
     seed: int | None = Query(None, description="乱数シード（省略時はランダム）"),
-    teams: int = Query(3, ge=2, le=6, description="チーム数（チーム0=プレイヤー、他はAI）"),
+    teams: int = Query(1, ge=1, le=6, description="チーム数（チーム0=プレイヤー。既定の1なら他チームなしの1人プレイ、2以上でAIが加わる）"),
     days: int = Query(5, ge=4, le=10, description="日数（ルール上 4〜10）"),
     agents: int = Query(4, ge=3, le=8, description="1チームのエージェント数（ルール上 3〜8）"),
     width: int = Query(12, ge=8, le=32, description="マップ横セル数（ルール上 8〜32）"),
@@ -100,7 +100,9 @@ def live_new(
 ):
     """ライブ対戦を開始する。
 
-    チーム0があなた（クライアント）、他チームは内蔵AI。以降の流れ:
+    チーム0があなた（クライアント）。既定（teams=1）では他チームは一切生成
+    されず、他プレイヤーとは無関係に自分の巡回だけを確認できる。teams を
+    2以上にすると内蔵AIチームが加わり順位を競う。以降の流れ:
     1. GET  /api/match       でマップ構成を取得
     2. POST /api/agents      でエージェント種別を提出（試合開始）
     3. GET  /api/match/{day} で当日の試合情報を取得

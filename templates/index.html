@@ -7,8 +7,8 @@
   <h2>ライブ対戦 <span class="badge">{{ live.status }}</span></h2>
   <table class="kv">
     <tr><th>進行</th><td>{{ live.day + 1 }} / {{ live.numDays }} 日目 — {{ live.message }}</td></tr>
-    <tr><th>暫定順位</th><td>
-      {% for s in live.standings %}{{ s.rank }}位 {{ s.name }}（{{ s.seriesCount }}種/累積{{ s.dailySeriesCum }}/{{ s.totalUdon }}玉）{% if not loop.last %} ／ {% endif %}{% endfor %}
+    <tr><th>{{ '成績' if live.solo else '暫定順位' }}</th><td>
+      {% for s in live.standings %}{% if not live.solo %}{{ s.rank }}位 {% endif %}{{ s.name }}（{{ s.seriesCount }}種/累積{{ s.dailySeriesCum }}/{{ s.totalUdon }}玉）{% if not loop.last %} ／ {% endif %}{% endfor %}
     </td></tr>
   </table>
 </section>
