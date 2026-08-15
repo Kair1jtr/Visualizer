@@ -566,6 +566,152 @@ body {
   display: none;
 }
 
+.panel-block.hidden {
+  display: none;
+}
+
+/* ---- Play GUI (ライブ対戦の操作画面) ---- */
+
+.status-line {
+  font-size: 0.85rem;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.setup-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.setup-form input {
+  width: 90px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--page);
+  color: var(--text);
+  font-size: 0.83rem;
+}
+
+.kind-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.kind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.kind-row select {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--page);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+#agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.agent-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.agent-card.armed {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.agent-card.done {
+  opacity: 0.75;
+}
+
+.agent-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+}
+
+.agent-remaining {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.agent-remaining.ok {
+  color: #1b9e4b;
+  font-weight: 700;
+}
+
+.agent-card .plan-code {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--text-2);
+  background: var(--grid);
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-bottom: 5px;
+  word-break: break-all;
+}
+
+.agent-card-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.agent-card-actions .btn {
+  font-size: 0.72rem;
+  padding: 3px 8px;
+}
+
+.plan-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.standing-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  padding: 3px 0;
+}
+
+.cell-armable {
+  stroke: var(--accent) !important;
+  stroke-width: 2.4 !important;
+  cursor: pointer;
+}
+
 /* ---- フッター ---- */
 
 .app-footer {

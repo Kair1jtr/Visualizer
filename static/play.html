@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ヘキサうどん Play</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎮%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="app-title">
+        <h1>ヘキサうどん <span class="subtitle">Play</span></h1>
+        <p class="tagline">GUIでライブ対戦を操作（/api/live 系エンドポイントの手動クライアント）</p>
+      </div>
+      <div class="app-actions">
+        <a class="btn" href="./index.html">ビジュアライザ</a>
+        <a class="btn" href="/debug">デバッグ GUI</a>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="board-panel">
+        <div class="board-toolbar">
+          <div id="status-line" class="status-line">読み込み中…</div>
+          <div class="zoom-controls">
+            <button id="btn-zoom-out" class="btn btn-icon" title="縮小">－</button>
+            <button id="btn-zoom-reset" class="btn btn-icon" title="表示リセット">⟲</button>
+            <button id="btn-zoom-in" class="btn btn-icon" title="拡大">＋</button>
+          </div>
+        </div>
+        <div class="board-wrap" id="board-wrap">
+          <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="tooltip" class="tooltip hidden"></div>
+          <div id="board-empty" class="board-empty">
+            <p>右側でライブ対戦を開始してください。</p>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side-panel">
+        <section class="panel-block" id="setup-card">
+          <h2>ライブ対戦を開始</h2>
+          <p class="hint">既定（teams=1）は他プレイヤー無しの1人プレイです。</p>
+          <form id="setup-form" class="setup-form">
+            <label>seed<input name="seed" placeholder="空=ランダム" /></label>
+            <label>teams<input name="teams" type="number" min="1" max="6" value="1" /></label>
+            <label>days<input name="days" type="number" min="4" max="10" value="5" /></label>
+            <label>agents<input name="agents" type="number" min="3" max="8" value="4" /></label>
+            <label>width<input name="width" type="number" min="8" max="32" value="12" /></label>
+            <label>height<input name="height" type="number" min="8" max="32" value="10" /></label>
+            <button class="btn btn-primary" type="submit">開始</button>
+          </form>
+        </section>
+
+        <section class="panel-block hidden" id="kind-card">
+          <h2>エージェント種別</h2>
+          <p class="hint">巡回車=移動して獲得（燃料消費）／補給車=巡回車に帯同し燃料補給。</p>
+          <div id="kind-list"></div>
+          <button id="btn-submit-kinds" class="btn btn-primary">確定して試合開始</button>
+        </section>
+
+        <section class="panel-block hidden" id="plan-card">
+          <h2>行動計画（<span id="plan-day-label">-</span>）</h2>
+          <p class="hint">
+            エージェントを選択 → 盤面で隣接セルをクリックすると移動、ステップ予算内で連続入力できます。
+          </p>
+          <div id="agent-list"></div>
+          <div class="plan-actions">
+            <button id="btn-submit-actions" class="btn btn-primary" disabled>行動計画を提出</button>
+          </div>
+        </section>
+
+        <section class="panel-block hidden" id="finished-card">
+          <h2>試合終了</h2>
+          <div id="final-standings"></div>
+          <p class="plan-actions">
+            <a class="btn btn-primary" href="./index.html">ビジュアライザで観戦</a>
+            <button id="btn-restart" class="btn">新しい対戦を始める</button>
+          </p>
+        </section>
+
+        <section class="panel-block">
+          <h2>暫定成績</h2>
+          <div id="standings"></div>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="app-footer">
+      <p>
+        GUIから <code>/api/live/new</code> → <code>/api/agents</code> →
+        <code>/api/actions</code> を直接操作するクライアントです。仕様は
+        <code>SPEC.md</code> を参照。
+      </p>
+    </footer>
+  </div>
+
+  <script type="module" src="./js/play.js"></script>
+</body>
+</html>
