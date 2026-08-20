@@ -276,17 +276,32 @@ export class BoardRenderer {
   }
 
   _bindPanZoom() {
+    // ドラッグ判定の移動量しきい値(px)。これ未満なら「クリック」として
+    // ポインタキャプチャしない: キャプチャすると click イベントの発火先が
+    // 押下点の要素からこの svg 自体に差し替わってしまい（Pointer Events 仕様上
+    // 挙動）、セル/エージェントの click ハンドラが呼ばれなくなるため。
+    const DRAG_THRESHOLD = 4;
+    let pressed = false;
     let dragging = false;
+    let downX = 0;
+    let downY = 0;
     let lastX = 0;
     let lastY = 0;
+    let pointerId = null;
     this.svg.addEventListener('pointerdown', (e) => {
-      dragging = true;
-      lastX = e.clientX;
-      lastY = e.clientY;
-      this.svg.setPointerCapture(e.pointerId);
+      pressed = true;
+      dragging = false;
+      downX = lastX = e.clientX;
+      downY = lastY = e.clientY;
+      pointerId = e.pointerId;
     });
     this.svg.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
+      if (!pressed) return;
+      if (!dragging) {
+        if (Math.hypot(e.clientX - downX, e.clientY - downY) < DRAG_THRESHOLD) return;
+        dragging = true;
+        this.svg.setPointerCapture(pointerId);
+      }
       // 画面px→viewBox座標系の変換係数
       const rect = this.svg.getBoundingClientRect();
       const vb = this.svg.viewBox.baseVal;
@@ -298,7 +313,8 @@ export class BoardRenderer {
       lastY = e.clientY;
       this._applyTransform();
     });
-    const stop = (e) => {
+    const stop = () => {
+      pressed = false;
       dragging = false;
     };
     this.svg.addEventListener('pointerup', stop);
