@@ -35,7 +35,7 @@ from .pathfinding import (
     terrain_key,
 )
 
-TEAM_NAMES = ["チームA", "チームB", "チームC", "チームD", "チームE", "チームF"]
+TEAM_NAMES = ["チームA", "チームB", "チームC", "チームD", "チームE", "チームF", "チームG", "チームH"]
 PLAYER_TEAM = 0
 PLAYER_NAME = "プレイヤー"
 

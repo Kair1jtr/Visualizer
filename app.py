@@ -57,7 +57,7 @@ def _get_current() -> dict:
 @app.post("/api/new")
 def new_match(
     seed: int | None = Query(None, description="乱数シード（省略時はランダム）"),
-    teams: int = Query(3, ge=2, le=6, description="チーム数"),
+    teams: int = Query(3, ge=2, le=8, description="チーム数（2〜8）"),
     days: int = Query(5, ge=4, le=10, description="日数（ルール上 4〜10）"),
     agents: int = Query(4, ge=3, le=8, description="1チームのエージェント数（ルール上 3〜8）"),
     width: int = Query(12, ge=8, le=32, description="マップ横セル数（ルール上 8〜32）"),
@@ -91,7 +91,7 @@ def new_match(
 @app.post("/api/live/new")
 def live_new(
     seed: int | None = Query(None, description="乱数シード（省略時はランダム）"),
-    teams: int = Query(1, ge=1, le=6, description="チーム数（チーム0=プレイヤー。既定の1なら他チームなしの1人プレイ、2以上でAIが加わる）"),
+    teams: int = Query(1, ge=1, le=8, description="チーム数（1〜8。チーム0=プレイヤー。既定の1なら他チームなしの1人プレイ、2以上でAIが加わる）"),
     days: int = Query(5, ge=4, le=10, description="日数（ルール上 4〜10）"),
     agents: int = Query(4, ge=3, le=8, description="1チームのエージェント数（ルール上 3〜8）"),
     width: int = Query(12, ge=8, le=32, description="マップ横セル数（ルール上 8〜32）"),

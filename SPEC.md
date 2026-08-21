@@ -180,7 +180,7 @@
 | クエリパラメータ | 範囲 | デフォルト |
 |---|---|---|
 | `seed` | 任意の整数（省略でランダム） | - |
-| `teams` | 2〜6 | 3 |
+| `teams` | 2〜8 | 3 |
 | `days` | 4〜10 | 5 |
 | `agents` | 3〜8 | 4 |
 | `width` | 8〜32 | 12 |
@@ -198,7 +198,7 @@
 
 | メソッド/パス | 内容 |
 |---|---|
-| `POST /api/live/new?teams=1&…` | ライブ対戦を開始（`teams` 以外のクエリパラメータは `/api/new` と同じ。`teams` の既定値は `1`、範囲は 1〜6） |
+| `POST /api/live/new?teams=1&…` | ライブ対戦を開始（`teams` 以外のクエリパラメータは `/api/new` と同じ。`teams` の既定値は `1`、範囲は 1〜8） |
 | `GET /api/live` | 進行状況: `status`（`waiting_agents` / `waiting_actions` / `finished`）、受付中の `day`、`solo`（1人プレイか）、成績/暫定順位 `standings` |
 
 進行フロー:
