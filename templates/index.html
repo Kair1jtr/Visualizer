@@ -37,7 +37,7 @@
 
   <h3>再生成（POST /api/new）</h3>
   <form class="regen" id="regen">
-    <label>seed（空=ランダム）<input name="seed" value="{{ meta.seed }}" /></label>
+    <label>seed（空=ランダム）<input name="seed" type="number" step="1" value="{{ meta.seed }}" /></label>
     <label>teams<input name="teams" type="number" min="2" max="8" value="{{ match.players }}" /></label>
     <label>days<input name="days" type="number" min="4" max="10" value="{{ num_days }}" /></label>
     <label>agents<input name="agents" type="number" min="3" max="8" value="{{ match.agents | length }}" /></label>

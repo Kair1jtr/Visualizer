@@ -39,6 +39,23 @@ $('btn-zoom-reset').addEventListener('click', () => renderer.resetView());
 
 // ----- API -----
 
+// FastAPI/Pydantic の自動検証エラーは detail が
+// [{loc, msg, type, ...}, ...] という配列になる（アプリ側の
+// HTTPException は detail が文字列）。両方を読める文字列にする。
+function formatErrorDetail(detail, fallback) {
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((e) => {
+        const field = Array.isArray(e?.loc) ? e.loc[e.loc.length - 1] : null;
+        return field ? `${field}: ${e.msg}` : e?.msg ?? JSON.stringify(e);
+      })
+      .join(' / ');
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail);
+  return fallback;
+}
+
 async function api(method, path, body) {
   const res = await fetch(path, {
     method,
@@ -48,7 +65,7 @@ async function api(method, path, body) {
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    const err = new Error(data?.detail ?? `HTTP ${res.status}`);
+    const err = new Error(formatErrorDetail(data?.detail, `HTTP ${res.status}`));
     err.status = res.status;
     throw err;
   }
@@ -272,6 +289,8 @@ function highlightArmable() {
   // 移動コストは出発セル（現在地）の地形で決まる。目的地の地形はコストに関係ない。
   const cost = costOf(state.match, state.trafficMap, agent.virtualPos);
   if (cost === null || cost.step > agent.remaining) return;
+  // 巡回車は燃料不足だと移動できず、補給されるまで待機になる（サーバー側の実行ルール）。
+  if (agent.kind === 'patrol' && agent.fuel < cost.fuel) return;
   for (let d = 0; d < 6; d++) {
     const nb = applyDirection(agent.virtualPos, d, width, height);
     if (nb === null) continue;
@@ -316,6 +335,9 @@ function tryMove(targetCell) {
   const cost = costOf(state.match, state.trafficMap, agent.virtualPos);
   if (cost.step > agent.remaining) {
     return alert(`残り${agent.remaining}ステップでは移動できません（必要${cost.step}ステップ）`);
+  }
+  if (agent.kind === 'patrol' && agent.fuel < cost.fuel) {
+    return alert(`燃料不足のため移動できません（必要${cost.fuel}／残り${agent.fuel}）。補給車で補給してください`);
   }
   agent.history.push({ remaining: agent.remaining, virtualPos: agent.virtualPos, fuel: agent.fuel });
   agent.codes.push(dir);
