@@ -229,6 +229,11 @@
   貪欲法（最寄りの未予約スポットへ Dijkstra 経路で連鎖訪問する巡回車 +
   最も燃料が少ない巡回車を追う補給車）の実装例つき。自分の戦略のベースとして
   `plan_patrol()` / `plan_supply()` を書き換えて使う。詳細は `algorithm/README.md`。
+- `algorithm/plan_builder.py` — 方向コード（0〜5）や待機の負数を直接書かず、
+  `DayPlan(match, info, kinds)` → `plan.agent(i).move(direction)` /
+  `.goto(cell)` / `.wait(n)` の関数呼び出しで1日分の行動計画を組み立てられる
+  ビルダー。盤外・池・ステップ予算不足・燃料不足のときは `ValueError`。
+  最後に `plan.to_json()` で `POST /api/actions` の body を得る。
 - `examples/client.py` — `algorithm/template.py` の `build_plans()` を使って
   ライブ対戦の通信手順（試合開始→種別提出→毎日の情報取得と行動計画提出）を
   実装した対戦クライアントの例。

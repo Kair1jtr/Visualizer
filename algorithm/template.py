@@ -33,7 +33,11 @@ from pathlib import Path
 # リポジトリ直下から visualizer パッケージ（六角形座標・経路探索）を借りる。
 # 自分のプログラムに組み込む場合は、このブロックと import 部分を
 # 好きな実装（あるいは他言語への移植）に置き換えて構わない。
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# （python algorithm/template.py のように直接実行された場合、
+#  algorithm/__init__.py は実行されないためここでも sys.path を通す）
+_repo_root = str(Path(__file__).resolve().parent.parent)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 from visualizer.hexgrid import direction_code
 from visualizer.pathfinding import (

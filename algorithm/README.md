@@ -11,9 +11,34 @@
   - 補給車: 燃料が最も少ない巡回車の到達予定地点へ向かう
   - 燃料切れの巡回車は待機扱いになるだけなので、戦略の改良は自由
 
-書き換える場所は `plan_patrol()` / `plan_supply()`（各エージェント1台分の
-1日の行動計画を決める）と、それらを呼び出す `build_plans()`
-（試合状況→行動計画のフォーマット変換）です。
+  書き換える場所は `plan_patrol()` / `plan_supply()`（各エージェント1台分の
+  1日の行動計画を決める）と、それらを呼び出す `build_plans()`
+  （試合状況→行動計画のフォーマット変換）です。
+
+- `plan_builder.py` — **方向コード（0〜5）や待機の負数（`-N`）を直接書かず、
+  `move()`/`wait()`/`goto()` の関数呼び出しで1日分の行動計画を組み立てる
+  ビルダー**。JSON配列を手で組み立てる代わりに使う。
+
+  ```python
+  from algorithm.plan_builder import DayPlan
+
+  plan = DayPlan(match, info, kinds)   # kinds は自分が提出したエージェント種別
+  plan.agent(0).goto(43)               # セル43へ、届く分だけ経路に沿って移動
+  plan.agent(1).move(2)                # 方向2(右)へ1マス
+  plan.agent(2).wait(5)                # 5ステップ待機
+  # agent(3) など何も呼ばなければ自動的に残り全ステップが待機になる
+
+  plans_json = plan.to_json()          # そのまま POST /api/actions の body
+  ```
+
+  - `move(direction)` — 0〜5方向へ1マス移動。盤外・池・ステップ予算不足・
+    （巡回車の）燃料不足のときは `ValueError` を投げる。事前確認したい場合は
+    `can_move(direction)`（bool）を使う
+  - `move_to(cell)` — 隣接セルへの移動を、方向コードを自分で計算せずに指定
+  - `goto(cell)` — 最短経路で向かう。予算が尽きたら途中で止まる
+    （戻り値は実際に到達したセル）。残りは次の `goto()`/`move()` で続けられる
+  - `wait(n=1)` — nステップ待機
+  - `.remaining` / `.cell` / `.fuel` で現在の残りステップ・位置・燃料を確認できる
 
 ## 入出力フォーマット
 

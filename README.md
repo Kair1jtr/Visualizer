@@ -148,6 +148,8 @@ app.py                     FastAPI サーバー（公式フォーマット API +
 algorithm/
   template.py              行動計画アルゴリズムのテンプレート（試合状況→
                            移動JSON）。貪欲法の実装例つき。CLIでも実行可能
+  plan_builder.py          move()/wait()/goto() で行動計画を組み立てる
+                           ビルダー（JSONの方向コードを直接書かずに済む）
   README.md                algorithm/ の使い方
 visualizer/
   hexgrid.py               六角形グリッド（odd-r）座標・方向コード変換
