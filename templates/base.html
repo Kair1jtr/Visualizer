@@ -74,6 +74,14 @@
       background: var(--page); color: var(--text); font-size: 0.83rem;
     }
     .links a { color: var(--accent); margin-right: 14px; font-size: 0.82rem; }
+    .day-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .day-tab {
+      padding: 4px 11px; border: 1px solid var(--border); border-radius: 999px;
+      color: var(--text-2); text-decoration: none; font-size: 0.8rem; background: var(--page);
+    }
+    .day-tab:hover { border-color: var(--accent); color: var(--text); }
+    .day-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .day-tab.disabled { opacity: 0.4; pointer-events: none; cursor: default; }
     .badge {
       display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.72rem;
       font-weight: 600; border: 1px solid var(--border);
@@ -89,6 +97,7 @@
       <a href="/debug/day/{{ i }}" {% if nav == 'day' and nav_day == i %}class="active"{% endif %}>{{ i + 1 }}日目</a>
       {% endfor %}
       <a href="/debug/requests" {% if nav == 'requests' %}class="active"{% endif %}>リクエストログ</a>
+      <a href="/algorithm" {% if nav == 'algorithm' %}class="active"{% endif %}>アルゴリズム</a>
       <a href="/docs">API docs</a>
       <a href="/">ビジュアライザ</a>
       <a href="/play.html">Play</a>

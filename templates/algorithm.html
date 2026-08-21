@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}アルゴリズム{% endblock %}
+{% block content %}
+
+{% if waiting_agents %}
+<section class="card">
+  <h2>アルゴリズムテンプレート</h2>
+  <p class="muted">
+    まだエージェント種別が提出されていません。行動計画を計算するには先に
+    <a href="/play.html">Play</a> などで <code>POST /api/agents</code> を提出して
+    試合を開始してください。
+  </p>
+</section>
+{% else %}
+
+<section class="card">
+  <h2>アルゴリズムテンプレート — {{ day + 1 }}日目 / 全{{ num_days }}日</h2>
+  <p class="muted" style="margin-bottom:8px">
+    試合状況（公式フォーマットの試合情報）から、貪欲法
+    （<code>visualizer/algorithm.py</code>。最寄りの未予約スポットへ
+    Dijkstra 経路で連鎖訪問する巡回車 + 最も燃料が少ない巡回車を追う補給車）で
+    行動計画（移動JSON）を計算した結果です。<code>examples/client.py</code> と同じロジック。
+  </p>
+  <div class="day-tabs" style="margin-bottom:4px">
+    {% for i in range(num_days) %}
+    <a class="day-tab {% if i == day %}active{% endif %} {% if i > max_day %}disabled{% endif %}"
+       href="{% if i <= max_day %}/algorithm?day={{ i }}{% else %}#{% endif %}">{{ i + 1 }}日目</a>
+    {% endfor %}
+  </div>
+  <p class="muted">全 {{ day_steps }} ステップ</p>
+</section>
+
+<section class="card">
+  <h2>エージェントごとの計算結果</h2>
+  <table>
+    <tr><th>#</th><th>種別</th><th>位置 (pos)</th><th>燃料</th><th>計算された行動計画</th></tr>
+    {% for a in agent_rows %}
+    <tr>
+      <td>{{ loop.index0 }}</td>
+      <td>{{ a.kind_name }}</td>
+      <td><code>{{ a.pos }}</code></td>
+      <td>{{ a.fuel }}</td>
+      <td><code class="plan-code">{{ a.plan | join(' ') }}</code></td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>行動計画の回答フォーマット（移動JSON）</h2>
+  <pre style="overflow-x:auto; background:var(--code-bg); padding:10px; border-radius:8px; font-size:0.8rem"><code>{{ plans_pretty }}</code></pre>
+  <p class="links" style="margin-top:8px">
+    <span class="mono">POST /api/actions?day={{ day }}</span> にこのJSONをそのまま送信すると提出できます。
+  </p>
+
+  {% if submittable %}
+  <button id="btn-submit" class="btn btn-primary">この計画を提出する（POST /api/actions?day={{ day }}）</button>
+  <p id="submit-result" class="muted" style="margin-top:6px"></p>
+  {% elif live %}
+  <p class="muted">この日はすでに提出済み、または未開始のため、ここからは提出できません（表示のみ）。</p>
+  {% else %}
+  <p class="muted">サンプルモードの試合のため提出しても試合結果には反映されません（形式検証のみ）。</p>
+  {% endif %}
+</section>
+
+<script>
+  const btn = document.getElementById('btn-submit');
+  if (btn) {
+    const PLANS = {{ plans_json | safe }};
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const out = document.getElementById('submit-result');
+      out.textContent = '送信中…';
+      try {
+        const res = await fetch('/api/actions?day={{ day }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(PLANS),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(JSON.stringify(data.detail ?? data));
+        out.textContent = '提出成功。次の日を表示します…';
+        setTimeout(() => { location.href = '/algorithm'; }, 700);
+      } catch (err) {
+        out.textContent = '提出に失敗しました: ' + err.message;
+        btn.disabled = false;
+      }
+    });
+  }
+</script>
+{% endif %}
+{% endblock %}

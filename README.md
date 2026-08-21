@@ -77,6 +77,22 @@ GET  /api/replay              全記録（ビジュアライザで観戦可能�
   でその日が実際に実行され、次の日へ進む
 - 試合終了後は結果を表示し、そのままビジュアライザへ遷移して観戦できる
 
+### 行動計画を自動計算する: アルゴリズムテンプレート (`/algorithm`)
+
+試合状況（公式フォーマットの試合情報）を貪欲法（`visualizer/algorithm.py`。
+`examples/client.py` と共通ロジック）に渡し、行動計画（移動JSON）を計算して
+表示するテンプレート画面です。
+
+- 巡回車: 最寄りの未予約スポットへ Dijkstra 経路で連鎖訪問
+- 補給車: 最も燃料が少ない巡回車の到達予定地点へ向かう
+- 計算結果はエージェントごとの表と、`POST /api/actions` にそのまま送れる
+  JSON（整形済み）で表示される
+- ライブ対戦で現在受付中の日であれば「この計画を提出する」ボタンでその場で
+  `POST /api/actions` に送信し、次の日へ進められる
+- 自作アルゴリズムのベースとして `visualizer/algorithm.py` の
+  `build_plans(match, info, kinds)` を読み替えて使える（通信を含まない
+  純粋な関数なので単体テストや別戦略への差し替えがしやすい）
+
 ## サーバーデバッグ GUI (`/debug`)
 
 サーバーが内部に保持している試合データと API の入出力を、ブラウザから
@@ -151,11 +167,16 @@ visualizer/
   hexaudon.py              試合を表す HexaUdon クラス（公式フォーマットの
                            キーと同名フィールドを持ち、模擬試合・ライブ対戦
                            両方をこのクラス1つで実行する）
+  algorithm.py             貪欲法アルゴリズム（試合状況→行動計画。通信を
+                           含まない純粋な関数。examples/client.py と
+                           /algorithm ルートの両方から共有）
   debugview.py             デバッグ GUI 用: SVG 描画・計画トレース・API ログ記録
 templates/
-  base.html ほか           デバッグ GUI（Jinja2: 概要 / 日別 / リクエストログ）
+  base.html ほか           デバッグ GUI（Jinja2: 概要 / 日別 / リクエストログ /
+                           アルゴリズムテンプレート）
 examples/
-  client.py                ライブ対戦のサンプルクライアント（貪欲戦略）
+  client.py                ライブ対戦のサンプルクライアント（algorithm.py の
+                           貪欲戦略を通信ループに組み込んだもの）
 static/
   index.html / style.css   ビジュアライザ UI（ライト/ダーク対応）
   play.html                Play（GUIでライブ対戦を操作）
