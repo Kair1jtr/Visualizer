@@ -78,7 +78,17 @@ plans = build_plans(match, info, kinds)
 
 ## 通信ループへの組み込み例
 
-`examples/client.py` は、この `build_plans()` を使って
-`/api/live/new` → `/api/agents` → (`/api/match/{day}` → `/api/actions` を
-日数分繰り返す) という通信ループを実装したサンプルです。
-自作プログラムを書く際の見本にしてください。
+- `examples/client.py` — `build_plans()`（Dijkstraで最適化した貪欲法）を使う版
+- `example_manual.py` — `plan_builder.py`（`move()`/`goto()`/`wait()`）を使う版
+
+どちらも `/api/live/new` → `/api/agents` → (`/api/match/{day}` →
+`/api/actions` を日数分繰り返す) という同じ通信ループです。実際に動かして
+比べてみてください:
+
+```bash
+python app.py                           # 別ターミナルでサーバー起動
+python algorithm/example_manual.py --seed 42
+```
+
+`decide(match, info, kinds)` 関数の中身（`plan_builder.py` の呼び出し方）が
+自作プログラムを書く際の見本になります。

@@ -150,6 +150,8 @@ algorithm/
                            移動JSON）。貪欲法の実装例つき。CLIでも実行可能
   plan_builder.py          move()/wait()/goto() で行動計画を組み立てる
                            ビルダー（JSONの方向コードを直接書かずに済む）
+  example_manual.py        plan_builder.py の使い方サンプル（通信ループ込み、
+                           そのまま実行してライブ対戦をプレイできる）
   README.md                algorithm/ の使い方
 visualizer/
   hexgrid.py               六角形グリッド（odd-r）座標・方向コード変換
