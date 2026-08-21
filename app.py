@@ -26,9 +26,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from visualizer import debugview
+from visualizer.hexaudon import PLAYER_NAME, HexaUdon, HexaUdonError
 from visualizer.hexgrid import apply_direction
-from visualizer.livematch import LiveError, LiveMatch
-from visualizer.simulator import generate_sample_match
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -42,7 +41,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 _lock = Lock()
 _current: dict | None = None  # サンプルモードの試合データ（bundle）
-_live: LiveMatch | None = None  # ライブ対戦モードの試合（非 None ならライブモード）
+_live: HexaUdon | None = None  # ライブ対戦モードの試合（非 None ならライブモード）
 
 
 def _get_current() -> dict:
@@ -51,7 +50,7 @@ def _get_current() -> dict:
         if _live is not None:
             return _live.bundle()
         if _current is None:
-            _current = generate_sample_match()
+            _current = HexaUdon().run()
         return _current
 
 
@@ -70,14 +69,14 @@ def new_match(
     """
     global _current, _live
     try:
-        bundle = generate_sample_match(
+        bundle = HexaUdon(
             seed=seed,
             num_teams=teams,
             num_days=days,
             num_agents=agents,
             width=width,
             height=height,
-        )
+        ).run()
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"試合生成に失敗しました: {exc}")
     with _lock:
@@ -111,19 +110,20 @@ def live_new(
     """
     global _live
     try:
-        match = LiveMatch(
+        match = HexaUdon(
             seed=seed,
             num_teams=teams,
             num_days=days,
             num_agents=agents,
             width=width,
             height=height,
+            team0_name=PLAYER_NAME,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"試合生成に失敗しました: {exc}")
     with _lock:
         _live = match
-    return {"ok": True, "seed": match.sim.seed, "status": match.status,
+    return {"ok": True, "seed": match.seed, "status": match.status,
             "message": "POST /api/agents でエージェント種別を提出すると試合が始まります"}
 
 
@@ -152,7 +152,7 @@ def match_day_info(day: int):
         if _live is not None:
             try:
                 return _live.day_info(day)
-            except LiveError as exc:
+            except HexaUdonError as exc:
                 raise HTTPException(status_code=409, detail=exc.detail)
     bundle = _get_current()
     if not 0 <= day < len(bundle["days"]):
@@ -246,10 +246,10 @@ def submit_agent_kinds(kinds: list = Body(...)):
     """
     with _lock:
         if _live is not None:
-            _validate_kinds(kinds, len(_live.sim.map["starts"]))
+            _validate_kinds(kinds, len(_live.agents))
             try:
                 _live.submit_kinds(kinds)
-            except LiveError as exc:
+            except HexaUdonError as exc:
                 raise HTTPException(status_code=409, detail=exc.detail)
             return {"accepted": True, "status": _live.status,
                     "message": "試合開始。GET /api/match/0 で初日の情報を取得してください"}
@@ -288,7 +288,7 @@ def submit_actions(
             _validate_plans(plans, match, _live.pending_info, match["daySteps"][day])
             try:
                 _live.submit_actions(day, plans)
-            except LiveError as exc:
+            except HexaUdonError as exc:
                 raise HTTPException(status_code=409, detail=exc.detail)
             return {
                 "accepted": True,

@@ -148,8 +148,9 @@ visualizer/
   hexgrid.py               六角形グリッド（odd-r）座標・方向コード変換
   pathfinding.py           地形コスト付き Dijkstra
   mapgen.py                マップ自動生成（連結性保証つき）
-  simulator.py             試合シミュレータ（AI/外部プラン実行・公式フォーマット出力）
-  livematch.py             ライブ対戦の進行管理（種別→行動計画→日実行）
+  hexaudon.py              試合を表す HexaUdon クラス（公式フォーマットの
+                           キーと同名フィールドを持ち、模擬試合・ライブ対戦
+                           両方をこのクラス1つで実行する）
   debugview.py             デバッグ GUI 用: SVG 描画・計画トレース・API ログ記録
 templates/
   base.html ほか           デバッグ GUI（Jinja2: 概要 / 日別 / リクエストログ）

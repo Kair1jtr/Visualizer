@@ -1,13 +1,16 @@
-"""ヘキサうどん サンプル試合シミュレータ。
+"""ヘキサうどん の試合を表す `HexaUdon` クラス。
 
-貪欲法 AI のチーム同士を募集要項のルールに沿って対戦させ、
-公式フォーマット（「競技部門『ヘキサうどん』のフォーマットについて」準拠）の
-試合データ一式を生成する:
+公式資料「競技部門『ヘキサうどん』のフォーマットについて」の
+**試合開始前のマップ構成フォーマット**のキーと同名のフィールドを持つ:
 
-- match:  試合開始前のマップ構成フォーマット
-- days[].info:  各日開始時の試合情報フォーマット（チーム0視点）
-- kinds:  エージェント種別の回答フォーマット（チームごと）
-- days[].plans: 行動計画の回答フォーマット（チームごと）
+    startsAt / daySeconds / daySteps / map（height, width, cells）/
+    spots（brand, pos, stocks）/ agents / fuelLimits / players /
+    busyThreshold / jammedThreshold
+
+このクラス1つで以下の両方を動かす:
+- 模擬試合（AI同士の貪欲法対戦。`run()` で全日程を一括生成）
+- ライブ対戦 / Play GUI（`submit_kinds()` → `submit_actions()` を日ごとに
+  呼んで1日ずつ進める。チーム0が外部クライアント＝プレイヤー）
 
 再現しているルール:
 - 移動: 出発セルの地形で決まるステップ数・燃料を消費（巡回車のみ燃料消費）
@@ -33,11 +36,21 @@ from .pathfinding import (
 )
 
 TEAM_NAMES = ["チームA", "チームB", "チームC", "チームD", "チームE", "チームF"]
+PLAYER_TEAM = 0
+PLAYER_NAME = "プレイヤー"
 
 # 公式フォーマットのコード表
 TERRAIN_CODE = {"plain": 0, "road": 1, "mountain": 2, "pond": 3}
 ROAD_STATUS_CODE = {"smooth": 0, "congested": 1, "jammed": 2}
 KIND_CODE = {"patrol": 0, "supply": 1}
+
+
+class HexaUdonError(Exception):
+    """ライブ対戦の手順誤り（HTTP 409 相当）。"""
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
 
 
 def _compress_waits(actions: list[int]) -> list[int]:
@@ -106,60 +119,95 @@ class _Team:
         self.total = 0
 
 
-class MatchSimulator:
-    def __init__(self, seed, num_teams, num_days, num_agents, width, height):
-        self.rng = random.Random(seed)
+class HexaUdon:
+    """1試合分の状態とロジックすべてを保持するクラス。
+
+    公式フォーマットのキーと同名のフィールド（下記）は試合開始前に確定し、
+    以後不変。試合中に変化する状態（各エージェントの位置・燃料など）は
+    アンダースコア始まりの内部フィールドに保持し、`bundle()`/`day_info()`
+    などのメソッドを通じて公式フォーマットのスナップショットとして取り出す。
+    """
+
+    def __init__(
+        self,
+        seed: int | None = None,
+        num_teams: int = 3,
+        num_days: int = 5,
+        num_agents: int = 4,
+        width: int = 12,
+        height: int = 10,
+        team0_name: str | None = None,
+    ):
+        if seed is None:
+            seed = random.randrange(1_000_000_000)
         self.seed = seed
-        self.width = width
-        self.height = height
+        self.rng = random.Random(seed)
 
         num_spots = max(6, min(14, (width * height) // 10))
         num_series = self.rng.randint(3, 5)
-        self.map = generate_map(
-            self.rng, width, height, num_spots, num_series, num_agents
-        )
-        self.spots = {s["cell"]: s for s in self.map["spots"]}
+        raw = generate_map(self.rng, width, height, num_spots, num_series, num_agents)
 
-        self.fuel_capacity = 14
-        self.congest_threshold = self.rng.randint(3, 4)
-        self.jam_threshold = self.rng.randint(7, 9)
+        self._terrain: list[str] = raw["terrain"]
+        self._width = width
+        self._height = height
+        self.seriesNames: list[str] = raw["series"]
 
-        self.num_supply = 2 if num_agents >= 6 else 1
-        self.teams = []
-        for t in range(num_teams):
+        # ----- 公式フォーマット「試合開始前のマップ構成フォーマット」のキー -----
+        cells = [
+            [TERRAIN_CODE[self._terrain[r * width + c]] for c in range(width)]
+            for r in range(height)
+        ]
+        self.map = {"height": height, "width": width, "cells": cells}
+        self.spots = [
+            {"brand": s["series"], "pos": s["cell"], "stocks": s["maxStock"]}
+            for s in raw["spots"]
+        ]
+        self.agents: list[int] = raw["starts"]  # エージェント初期位置
+        self.fuelLimits = 14
+        self.players = num_teams
+        self.busyThreshold = self.rng.randint(3, 4)
+        self.jammedThreshold = self.rng.randint(7, 9)
+        self.daySteps = [self.rng.randint(36, 46) for _ in range(num_days)]
+        self.daySeconds = [self.rng.choice([5, 7, 10]) for _ in range(num_days)]
+        self.startsAt = int(time.time())
+        # 各日の回答受付終了時刻: 開始時刻から回答時間を積み上げ（日間に30秒の間隔）
+        self.endsAt: list[int] = []
+        t = self.startsAt
+        for sec in self.daySeconds:
+            t += sec
+            self.endsAt.append(t)
+            t += 30
+
+        # ----- 内部状態 -----
+        self._spots_by_cell = {s["pos"]: s for s in self.spots}
+        num_supply = 2 if num_agents >= 6 else 1
+        self._teams: list[_Team] = []
+        for ti in range(num_teams):
             agents = []
-            for i, start in enumerate(self.map["starts"]):
-                is_supply = i >= num_agents - self.num_supply
+            for i, start in enumerate(self.agents):
+                is_supply = i >= num_agents - num_supply
                 agents.append(
                     _Agent(
                         "supply" if is_supply else "patrol",
                         start,
-                        None if is_supply else self.fuel_capacity,
+                        None if is_supply else self.fuelLimits,
                     )
                 )
-            self.teams.append(
-                _Team(TEAM_NAMES[t], agents, random.Random(seed * 1000 + t))
-            )
-
-        self.day_steps = [self.rng.randint(36, 46) for _ in range(num_days)]
-        self.day_seconds = [self.rng.choice([5, 7, 10]) for _ in range(num_days)]
-        self.starts_at = int(time.time())
-        # 各日の回答受付終了時刻: 開始時刻から回答時間を積み上げ（日間に30秒の間隔）
-        self.ends_at = []
-        t = self.starts_at
-        for sec in self.day_seconds:
-            t += sec
-            self.ends_at.append(t)
-            t += 30
-        self.traffic_history: list[dict[int, int]] = []
-        self.days = []
+            name = team0_name if (ti == 0 and team0_name) else TEAM_NAMES[ti]
+            self._teams.append(_Team(name, agents, random.Random(seed * 1000 + ti)))
+        self._traffic_history: list[dict[int, int]] = []
+        self.days: list[dict] = []
         # begin_day で確定し execute_day で消費する「進行中の日」の状態
         self._pending: tuple[int, dict[int, str], dict] | None = None
+
+        # ----- ライブ対戦（Play GUI）の進行状態 -----
+        self._kinds_submitted = False
+        self.current_day = 0
 
     # ----- 地形・コスト -----
 
     def _key_of(self, road_states):
-        terrain = self.map["terrain"]
+        terrain = self._terrain
 
         def key(cell):
             return terrain_key(terrain[cell], road_states.get(cell, "smooth"))
@@ -167,22 +215,21 @@ class MatchSimulator:
         return key
 
     def _road_states_for_day(self, day_index: int) -> dict[int, str]:
-        terrain = self.map["terrain"]
         states = {}
         if day_index == 0:
             recent = {}
         else:
-            recent = dict(self.traffic_history[-1])
+            recent = dict(self._traffic_history[-1])
             if day_index >= 2:
-                for cell, cnt in self.traffic_history[-2].items():
+                for cell, cnt in self._traffic_history[-2].items():
                     recent[cell] = recent.get(cell, 0) + cnt
-        for cell, t in enumerate(terrain):
+        for cell, t in enumerate(self._terrain):
             if t != "road":
                 continue
-            volume = recent.get(cell, 0) / len(self.teams)
-            if volume >= self.jam_threshold:
+            volume = recent.get(cell, 0) / len(self._teams)
+            if volume >= self.jammedThreshold:
                 states[cell] = "jammed"
-            elif volume >= self.congest_threshold:
+            elif volume >= self.busyThreshold:
                 states[cell] = "congested"
             else:
                 states[cell] = "smooth"
@@ -191,11 +238,11 @@ class MatchSimulator:
     # ----- AI -----
 
     def _plan_patrol(self, team: _Team, agent_idx: int, agent: _Agent, key_of, steps_left: int):
-        dist, prev = dijkstra(agent.cell, self.width, self.height, key_of)
+        dist, prev = dijkstra(agent.cell, self._width, self._height, key_of)
         best = None
         best_score = -1.0
         unaffordable = False
-        for cell, spot in self.spots.items():
+        for cell, spot in self._spots_by_cell.items():
             if team.stock.get(cell, 0) <= 0 or cell in agent.acquired_today:
                 continue
             if cell == agent.cell:
@@ -212,7 +259,7 @@ class MatchSimulator:
             if fuel_need > agent.fuel:
                 unaffordable = True
                 continue
-            series = spot["series"]
+            series = spot["brand"]
             if series not in team.series_overall:
                 bonus = team.bonus_new_series
             elif series not in team.series_today:
@@ -241,7 +288,7 @@ class MatchSimulator:
         if waiting:
             target = min(waiting, key=lambda a: a.fuel)
         else:
-            low = [a for a in patrols if a.fuel <= self.fuel_capacity * team.supply_threshold]
+            low = [a for a in patrols if a.fuel <= self.fuelLimits * team.supply_threshold]
             if not low:
                 agent.path = []
                 agent.dest = None
@@ -252,7 +299,7 @@ class MatchSimulator:
             agent.dest = agent.cell
             return
         if agent.dest != target.cell or not agent.path:
-            dist, prev = dijkstra(agent.cell, self.width, self.height, key_of)
+            dist, prev = dijkstra(agent.cell, self._width, self._height, key_of)
             path = reconstruct_path(prev, agent.cell, target.cell)
             if path:
                 agent.path = path[1:]
@@ -267,7 +314,7 @@ class MatchSimulator:
                 "kind": KIND_CODE[a.kind],
                 "pos": a.cell,
                 # 補給車に燃料の概念はないが、公式サンプル同様に上限値を入れる
-                "fuel": a.fuel if a.fuel is not None else self.fuel_capacity,
+                "fuel": a.fuel if a.fuel is not None else self.fuelLimits,
             }
             for a in team.agents
         ]
@@ -275,12 +322,12 @@ class MatchSimulator:
     def _day_info(self, day_index: int, road_states: dict[int, str]) -> dict:
         """各日開始時の試合情報フォーマット（チーム0視点）。"""
         return {
-            "endsAt": self.ends_at[day_index],
+            "endsAt": self.endsAt[day_index],
             "day": day_index,  # 初日は 0
-            "agents": self._agents_info(self.teams[0]),
+            "agents": self._agents_info(self._teams[0]),
             "others": [
                 {"id": ti, "agents": self._agents_info(team)}
-                for ti, team in enumerate(self.teams)
+                for ti, team in enumerate(self._teams)
                 if ti != 0
             ],
             "traffics": [
@@ -293,14 +340,14 @@ class MatchSimulator:
         """チームのエージェント種別を差し替える（試合開始前=初日開始前のみ）。"""
         if self.days or self._pending is not None:
             raise ValueError("種別の変更は試合開始前のみ可能です")
-        team = self.teams[team_index]
+        team = self._teams[team_index]
         team.agents = [
             _Agent(
                 "supply" if k == KIND_CODE["supply"] else "patrol",
                 start,
-                None if k == KIND_CODE["supply"] else self.fuel_capacity,
+                None if k == KIND_CODE["supply"] else self.fuelLimits,
             )
-            for k, start in zip(kinds, self.map["starts"])
+            for k, start in zip(kinds, self.agents)
         ]
 
     def begin_day(self, day_index: int) -> dict:
@@ -310,8 +357,8 @@ class MatchSimulator:
         road_states = self._road_states_for_day(day_index)
 
         # 日初期化: 在庫補充・獲得履歴/計画リセット
-        for team in self.teams:
-            team.stock = {c: s["maxStock"] for c, s in self.spots.items()}
+        for team in self._teams:
+            team.stock = {c: s["stocks"] for c, s in self._spots_by_cell.items()}
             team.claims = {}
             team.series_today = set()
             for agent in team.agents:
@@ -343,7 +390,7 @@ class MatchSimulator:
             return None  # 燃料不足 → 補給されるまで待機（コマンドは保留）
         if steps_left < STEP_COST[key]:
             return None  # 日内に完了しない移動 → 待機
-        target = apply_direction(agent.cell, value, self.width, self.height)
+        target = apply_direction(agent.cell, value, self._width, self._height)
         if target is None or terrain[target] == "pond":
             cursor.take()
             return None  # 不正な移動（受付時の検証で通常は弾かれる）→ 無視
@@ -364,7 +411,7 @@ class MatchSimulator:
             raise ValueError("begin_day が呼ばれていません")
         day_index, road_states, info = self._pending
         self._pending = None
-        steps = self.day_steps[day_index]
+        steps = self.daySteps[day_index]
         key_of = self._key_of(road_states)
         cursors = {
             ti: [_PlanCursor(plan) for plan in plans]
@@ -372,18 +419,18 @@ class MatchSimulator:
         }
 
         # 各エージェントの行動記録（公式の行動計画フォーマットに変換する）
-        actions = [[[] for _ in team.agents] for team in self.teams]
+        actions = [[[] for _ in team.agents] for team in self._teams]
         traffic: dict[int, int] = {}
-        terrain = self.map["terrain"]
+        terrain = self._terrain
 
         for k in range(steps):
             steps_left = steps - k
             cells_at_start = [
-                [a.cell for a in team.agents] for team in self.teams
+                [a.cell for a in team.agents] for team in self._teams
             ]
 
             # 行動決定・移動命令
-            for ti, team in enumerate(self.teams):
+            for ti, team in enumerate(self._teams):
                 team_cursors = cursors.get(ti)
                 for ai, agent in enumerate(team.agents):
                     if agent.move_remaining > 0:
@@ -416,7 +463,7 @@ class MatchSimulator:
                         agent.move_remaining = STEP_COST[key]
                         agent.move_target = agent.path.pop(0)
                         actions[ti][ai].append(
-                            direction_code(agent.cell, agent.move_target, self.width)
+                            direction_code(agent.cell, agent.move_target, self._width)
                         )
                     else:  # supply
                         self._plan_supply(team, agent, key_of)
@@ -428,23 +475,23 @@ class MatchSimulator:
                         agent.move_remaining = STEP_COST[key]
                         agent.move_target = agent.path.pop(0)
                         actions[ti][ai].append(
-                            direction_code(agent.cell, agent.move_target, self.width)
+                            direction_code(agent.cell, agent.move_target, self._width)
                         )
 
             # 移動していないエージェントはこのステップを待機として記録
-            for ti, team in enumerate(self.teams):
+            for ti, team in enumerate(self._teams):
                 for ai, agent in enumerate(team.agents):
                     if agent.move_remaining == 0:
                         actions[ti][ai].append(-1)
 
             # 交通量（このステップ中に道路セルへ滞在したエージェント数）
-            for team in self.teams:
+            for team in self._teams:
                 for agent in team.agents:
                     if terrain[agent.cell] == "road":
                         traffic[agent.cell] = traffic.get(agent.cell, 0) + 1
 
             # 移動の進行と到着処理
-            for ti, team in enumerate(self.teams):
+            for ti, team in enumerate(self._teams):
                 for ai, agent in enumerate(team.agents):
                     if agent.move_remaining <= 0:
                         continue
@@ -455,7 +502,7 @@ class MatchSimulator:
                     agent.move_target = None
                     if agent.kind != "patrol":
                         continue
-                    spot = self.spots.get(agent.cell)
+                    spot = self._spots_by_cell.get(agent.cell)
                     if (
                         spot
                         and team.stock.get(agent.cell, 0) > 0
@@ -464,19 +511,19 @@ class MatchSimulator:
                         team.stock[agent.cell] -= 1
                         agent.acquired_today.add(agent.cell)
                         team.total += 1
-                        team.series_overall.add(spot["series"])
-                        team.series_today.add(spot["series"])
+                        team.series_overall.add(spot["brand"])
+                        team.series_today.add(spot["brand"])
                         team.claims.pop(agent.cell, None)
                         if agent.target_spot == agent.cell:
                             agent.target_spot = None
 
             # 補給: 1ステップの間 同セルに居続けた巡回車×補給車
-            for ti, team in enumerate(self.teams):
+            for ti, team in enumerate(self._teams):
                 supplies = [
                     (ai, a) for ai, a in enumerate(team.agents) if a.kind == "supply"
                 ]
                 for ai, agent in enumerate(team.agents):
-                    if agent.kind != "patrol" or agent.fuel >= self.fuel_capacity:
+                    if agent.kind != "patrol" or agent.fuel >= self.fuelLimits:
                         continue
                     for si, supply in supplies:
                         stayed_together = (
@@ -485,13 +532,13 @@ class MatchSimulator:
                             and cells_at_start[ti][si] == supply.cell
                         )
                         if stayed_together:
-                            agent.fuel = self.fuel_capacity
+                            agent.fuel = self.fuelLimits
                             agent.waiting_fuel = False
                             break
 
-        for team in self.teams:
+        for team in self._teams:
             team.daily_series_counts.append(len(team.series_today))
-        self.traffic_history.append(traffic)
+        self._traffic_history.append(traffic)
 
         self.days.append(
             {
@@ -503,10 +550,11 @@ class MatchSimulator:
             }
         )
 
-    # ----- 実行と出力 -----
+    # ----- 模擬試合（AI対戦）としての実行 -----
 
     def run(self) -> dict:
-        for d in range(len(self.day_steps)):
+        """全日程を AI 同士でシミュレーションし、試合データ一式を返す。"""
+        for d in range(len(self.daySteps)):
             self.begin_day(d)
             self.execute_day()
         return self.bundle()
@@ -517,7 +565,7 @@ class MatchSimulator:
         ライブ試合では日が進むごとに days が伸びる（途中経過でも呼べる）。
         """
         per_team = []
-        for team in self.teams:
+        for team in self._teams:
             per_team.append(
                 {
                     "name": team.name,
@@ -527,7 +575,7 @@ class MatchSimulator:
                 }
             )
         ranking = sorted(
-            range(len(self.teams)),
+            range(len(self._teams)),
             key=lambda i: (
                 -per_team[i]["seriesCount"],
                 -per_team[i]["dailySeriesCum"],
@@ -536,13 +584,6 @@ class MatchSimulator:
             ),
         )
 
-        width = self.map["width"]
-        height = self.map["height"]
-        cells = [
-            [TERRAIN_CODE[self.map["terrain"][r * width + c]] for c in range(width)]
-            for r in range(height)
-        ]
-
         return {
             "format": "hexaudon-official-v1",
             # meta はビジュアライザ用の補助情報（公式フォーマット外）
@@ -550,53 +591,122 @@ class MatchSimulator:
                 "title": f"サンプル試合 (seed={self.seed})",
                 "seed": self.seed,
                 "generator": "sample-simulator",
-                "teamNames": [team.name for team in self.teams],
-                "seriesNames": self.map["series"],
+                "teamNames": [team.name for team in self._teams],
+                "seriesNames": self.seriesNames,
                 "expected": {"perTeam": per_team, "ranking": ranking},
             },
             # 試合開始前のマップ構成フォーマット（公式）
             "match": {
-                "startsAt": self.starts_at,
-                "daySeconds": self.day_seconds,
-                "daySteps": self.day_steps,
-                "map": {"height": height, "width": width, "cells": cells},
-                "spots": [
-                    {"brand": s["series"], "pos": s["cell"], "stocks": s["maxStock"]}
-                    for s in self.map["spots"]
-                ],
-                "agents": self.map["starts"],
-                "fuelLimits": self.fuel_capacity,
-                "players": len(self.teams),
-                "busyThreshold": self.congest_threshold,
-                "jammedThreshold": self.jam_threshold,
+                "startsAt": self.startsAt,
+                "daySeconds": self.daySeconds,
+                "daySteps": self.daySteps,
+                "map": self.map,
+                "spots": self.spots,
+                "agents": self.agents,
+                "fuelLimits": self.fuelLimits,
+                "players": self.players,
+                "busyThreshold": self.busyThreshold,
+                "jammedThreshold": self.jammedThreshold,
             },
             # エージェント種別の回答フォーマット（公式・チームごと）
             "kinds": [
-                [KIND_CODE[a.kind] for a in team.agents] for team in self.teams
+                [KIND_CODE[a.kind] for a in team.agents] for team in self._teams
             ],
             # days[].info: 各日開始時の試合情報フォーマット（公式・チーム0視点）
             # days[].plans: 行動計画の回答フォーマット（公式・チームごと）
             "days": self.days,
         }
 
+    # ----- ライブ対戦（Play GUI）としての実行 -----
+    #
+    # チーム0（PLAYER_TEAM）を外部クライアントが操作する想定で、
+    # submit_kinds() → submit_actions() を日ごとに呼んで1日ずつ進める。
 
-def generate_sample_match(
-    seed: int | None = None,
-    num_teams: int = 3,
-    num_days: int = 5,
-    num_agents: int = 4,
-    width: int = 12,
-    height: int = 10,
-) -> dict:
-    if seed is None:
-        seed = random.randrange(1_000_000_000)
-    sim = MatchSimulator(seed, num_teams, num_days, num_agents, width, height)
-    return sim.run()
+    @property
+    def numDays(self) -> int:
+        return len(self.daySteps)
+
+    @property
+    def finished(self) -> bool:
+        return self.current_day >= self.numDays
+
+    @property
+    def status(self) -> str:
+        if not self._kinds_submitted:
+            return "waiting_agents"
+        if self.finished:
+            return "finished"
+        return "waiting_actions"
+
+    @property
+    def solo(self) -> bool:
+        return len(self._teams) == 1
+
+    @property
+    def pending_info(self) -> dict:
+        """受付中の日の試合情報（begin_day 済み）。"""
+        return self._pending[2]
+
+    def submit_kinds(self, kinds: list[int]):
+        if self._kinds_submitted:
+            raise HexaUdonError("エージェント種別は提出済みです（試合は開始しています）")
+        self.set_team_kinds(PLAYER_TEAM, kinds)
+        self._kinds_submitted = True
+        self.begin_day(0)
+
+    def submit_actions(self, day: int, plans: list[list[int]]):
+        if not self._kinds_submitted:
+            raise HexaUdonError("先に POST /api/agents でエージェント種別を提出してください")
+        if self.finished:
+            raise HexaUdonError("試合は終了しています（POST /api/live/new で新しい試合を開始）")
+        if day != self.current_day:
+            raise HexaUdonError(f"現在回答を受付中の日は {self.current_day} です")
+        self.execute_day({PLAYER_TEAM: plans})
+        self.current_day += 1
+        if not self.finished:
+            self.begin_day(self.current_day)
+
+    def day_info(self, day: int) -> dict:
+        if not self._kinds_submitted:
+            raise HexaUdonError("先に POST /api/agents でエージェント種別を提出してください")
+        if day < self.current_day:
+            return self.days[day]["info"]
+        if day == self.current_day and not self.finished:
+            return self.pending_info
+        raise HexaUdonError(f"day {day} はまだ開始していません（現在 day {self.current_day}）")
+
+    def standings(self) -> list[dict]:
+        """現時点の順位表（順位順）。"""
+        expected = self.bundle()["meta"]["expected"]
+        return [
+            {"rank": rank + 1, "team": ti, **expected["perTeam"][ti]}
+            for rank, ti in enumerate(expected["ranking"])
+        ]
+
+    def summary(self) -> dict:
+        """GET /api/live 用の進行状況。"""
+        out = {
+            "live": True,
+            "status": self.status,
+            "seed": self.seed,
+            "day": min(self.current_day, self.numDays - 1),
+            "numDays": self.numDays,
+            "playerTeam": PLAYER_TEAM,
+            "solo": self.solo,
+            "standings": self.standings(),
+        }
+        if self.status == "waiting_agents":
+            out["message"] = "POST /api/agents で種別を提出すると試合が始まります"
+        elif self.status == "waiting_actions":
+            out["message"] = f"POST /api/actions?day={self.current_day} で行動計画を提出してください"
+        else:
+            out["message"] = "試合終了。GET /api/replay で全記録を取得できます"
+        return out
 
 
 if __name__ == "__main__":
     import json
     import sys
 
-    match = generate_sample_match(seed=42)
+    match = HexaUdon(seed=42).run()
     json.dump(match, sys.stdout, ensure_ascii=False)
