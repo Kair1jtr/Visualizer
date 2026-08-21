@@ -3,33 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ヘキサうどん Visualizer</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍜%3C/text%3E%3C/svg%3E" />
+  <title>ヘキサうどん Watch</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📺%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <div id="app">
     <header class="app-header">
       <div class="app-title">
-        <h1>ヘキサうどん <span class="subtitle">Visualizer</span></h1>
-        <p class="tagline">第37回全国高等専門学校プログラミングコンテスト 競技部門</p>
+        <h1>ヘキサうどん <span class="subtitle">Watch</span></h1>
+        <p class="tagline">
+          <code>POST /api/new</code> で新しい試合が作られるたびに自動検知し、
+          終了まで自動再生する観戦専用ビュー
+        </p>
       </div>
       <div class="app-actions">
-        <button id="btn-sample" class="btn btn-primary">サンプル試合を生成</button>
-        <button id="btn-reload" class="btn" title="ライブ対戦の経過など、サーバーが保持中の試合を再生成せずに表示">現在の試合を表示</button>
-        <label class="btn">
-          JSONを読込
-          <input type="file" id="file-input" accept="application/json,.json" hidden />
-        </label>
-        <a class="btn" href="./play.html">Play（GUIで対戦）</a>
-        <a class="btn" href="./watch.html">Watch（観戦専用）</a>
+        <a class="btn" href="./index.html">ビジュアライザ</a>
+        <a class="btn" href="./play.html">Play</a>
       </div>
     </header>
 
     <main class="app-main">
       <section class="board-panel">
         <div class="board-toolbar">
-          <div class="day-tabs" id="day-tabs"></div>
+          <div id="watch-status" class="status-line">新しい試合を待っています…</div>
           <div class="zoom-controls">
             <button id="btn-zoom-out" class="btn btn-icon" title="縮小">－</button>
             <button id="btn-zoom-reset" class="btn btn-icon" title="表示リセット">⟲</button>
@@ -40,7 +37,7 @@
           <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
           <div id="tooltip" class="tooltip hidden"></div>
           <div id="board-empty" class="board-empty">
-            <p>「サンプル試合を生成」を押すか、試合ログJSONを読み込んでください。</p>
+            <p>試合が生成されるとここに自動で表示されます（ビジュアライザやAPIで<code>POST /api/new</code>を呼ぶ）。</p>
           </div>
         </div>
         <div class="playback-bar">
@@ -60,7 +57,6 @@
       <aside class="side-panel">
         <section class="panel-block">
           <h2>スコア</h2>
-          <p class="hint">行をクリックすると盤面の在庫表示がそのチーム視点になります。</p>
           <div id="scoreboard"></div>
         </section>
 
@@ -80,14 +76,12 @@
 
     <footer class="app-footer">
       <p>
-        非公式ビジュアライザ（公式プロトコル公開前の暫定データ形式）。形式仕様は
-        <code>README.md</code> を参照。サーバー内部の確認は
-        <a href="/debug">デバッグ GUI</a> へ、GUIでの対戦操作は
-        <a href="./play.html">Play</a> へ。
+        観戦専用ビュー（自動更新・自動再生）。手動で操作したい場合は
+        <a href="./index.html">ビジュアライザ</a>を使ってください。
       </p>
     </footer>
   </div>
 
-  <script type="module" src="./js/main.js"></script>
+  <script type="module" src="./js/watch.js"></script>
 </body>
 </html>
