@@ -220,13 +220,25 @@
 
 サーバー内部の状態を確認するデバッグ GUI（本リポジトリ独自、FastAPI + Jinja2）。ライブ対戦中は進行状況カードも表示。詳細は README.md を参照。
 
-### 2.9 サンプルクライアント
+### 2.9 サンプルクライアント & アルゴリズムテンプレート
 
-`examples/client.py` — ライブ対戦の通信手順（試合開始→種別提出→毎日の情報取得と行動計画提出）の実装例。Dijkstra で最寄りスポットを連鎖訪問する貪欲戦略。
+- `algorithm/template.py` — **試合状況（match + info + kinds）→ 行動計画（移動JSON）**
+  を計算するアルゴリズムのテンプレート（本リポジトリ独自）。通信を含まない
+  純粋関数 `build_plans(match, info, kinds)` と、ファイル/標準入力/実行中の
+  サーバーから試合状況を読んで移動JSONを標準出力に書く CLI を提供する。
+  貪欲法（最寄りの未予約スポットへ Dijkstra 経路で連鎖訪問する巡回車 +
+  最も燃料が少ない巡回車を追う補給車）の実装例つき。自分の戦略のベースとして
+  `plan_patrol()` / `plan_supply()` を書き換えて使う。詳細は `algorithm/README.md`。
+- `examples/client.py` — `algorithm/template.py` の `build_plans()` を使って
+  ライブ対戦の通信手順（試合開始→種別提出→毎日の情報取得と行動計画提出）を
+  実装した対戦クライアントの例。
 
 ```bash
 python app.py                        # サーバー起動（別ターミナル）
 python examples/client.py --seed 42  # 対戦実行
+
+# アルゴリズム単体もCLIから試せる
+python algorithm/template.py --server http://127.0.0.1:8000 --day 0 --kinds 0,0,0,1
 ```
 
 ### 2.10 GUI操作クライアント (`/play.html`)
@@ -237,23 +249,6 @@ python examples/client.py --seed 42  # 対戦実行
 セルをクリックすると1手ずつ移動方向が積み上がり、ステップ・燃料予算を画面上で
 追跡しながら行動計画を組み立てて提出できる。プログラムを書かずに手動で
 1試合プレイしたい場合や、API仕様の動作確認に使う。
-
-### 2.11 アルゴリズムテンプレート (`GET /algorithm?day=N`)
-
-試合状況（公式フォーマットの試合情報）を貪欲法アルゴリズム
-（`visualizer/algorithm.py`。`build_plans(match, info, kinds)`。
-`examples/client.py` と共通ロジック）に渡して行動計画（移動JSON）を計算し、
-サーバーサイドで表示するテンプレート（本リポジトリ独自、Jinja2）。
-
-- `day` 省略時はライブ対戦中なら現在受付中の日、それ以外は0日目
-- エージェント種別が未提出（`waiting_agents`）の間は計算できず、案内のみ表示
-- 計算結果はエージェントごとの表と、`POST /api/actions` にそのまま送れる
-  整形済みJSONで表示される
-- ライブ対戦で現在受付中の日（`day == 現在の日`）を表示している場合のみ、
-  「この計画を提出する」ボタンでその場で `POST /api/actions` に送信できる
-  （送信後は次の日を自動表示）
-- 自作アルゴリズムの出発点として `visualizer/algorithm.py` を差し替えて使える
-  （通信を含まない純粋関数）
 
 ---
 

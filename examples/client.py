@@ -23,10 +23,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# リポジトリ直下から visualizer パッケージ（六角形座標・経路探索・貪欲法）を借りる
+# リポジトリ直下から algorithm パッケージ（貪欲法テンプレート）を借りる
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from visualizer.algorithm import build_plans  # noqa: E402（sys.path 追加後に import するため）
+from algorithm.template import build_plans  # noqa: E402（sys.path 追加後に import するため）
 
 
 def api(server: str, method: str, path: str, body=None):

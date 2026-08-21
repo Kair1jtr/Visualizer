@@ -10,14 +10,12 @@
 - GET  /api/replay       ビジュアライザ用: 全日の情報+全チームの行動計画一式
 - POST /api/new          新しいサンプル試合を生成（seed 等のパラメータ付き）
 - GET  /debug            サーバー内部を確認するデバッグ GUI（Jinja2）
-- GET  /algorithm        試合状況から行動計画(移動JSON)を計算するテンプレート
 
 本番サーバー同様 HTTP/1.1 で応答する（uvicorn の h11 実装）。
 
 起動:  python app.py   または   uvicorn app:app
 """
 
-import json
 import time
 from pathlib import Path
 from threading import Lock
@@ -28,7 +26,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from visualizer import debugview
-from visualizer.algorithm import build_plans
 from visualizer.hexaudon import PLAYER_NAME, HexaUdon, HexaUdonError
 from visualizer.hexgrid import apply_direction
 
@@ -460,73 +457,6 @@ def debug_requests(request: Request):
             "nav": "requests",
             "num_days": len(bundle["days"]),
             "entries": entries,
-        },
-    )
-
-
-# ----- /algorithm: 試合状況から行動計画(移動JSON)を計算するテンプレート -----
-
-
-@app.get("/algorithm", response_class=HTMLResponse, include_in_schema=False)
-def algorithm_template(
-    request: Request,
-    day: int | None = Query(None, description="表示する日（0始まり、省略時は現在の日）"),
-):
-    """試合状況（公式フォーマット）から行動計画（移動JSON）を計算して表示する。
-
-    貪欲法（visualizer/algorithm.py、examples/client.py と共通）で、
-    最寄りの未予約スポットへ Dijkstra 経路で連鎖訪問する巡回車と、
-    最も燃料が少ない巡回車を追う補給車の1日分の行動計画を計算する。
-    ライブ対戦で現在受付中の日であれば、その場で /api/actions に提出できる。
-    """
-    with _lock:
-        live = _live
-    bundle = _get_current()
-    match = bundle["match"]
-    num_days = len(match["daySteps"])
-
-    if live is not None and live.status == "waiting_agents":
-        return templates.TemplateResponse(
-            request=request,
-            name="algorithm.html",
-            context={"nav": "algorithm", "num_days": num_days, "waiting_agents": True},
-        )
-
-    default_day = live.current_day if live is not None else 0
-    day = default_day if day is None else day
-    if not 0 <= day < num_days:
-        raise HTTPException(status_code=404, detail=f"day は 0〜{num_days - 1}")
-
-    try:
-        info = live.day_info(day) if live is not None else bundle["days"][day]["info"]
-    except HexaUdonError as exc:
-        raise HTTPException(status_code=409, detail=exc.detail)
-    except IndexError:
-        raise HTTPException(status_code=404, detail=f"day は 0〜{num_days - 1}")
-
-    kinds = bundle["kinds"][0]
-    plans = build_plans(match, info, kinds)
-    submittable = live is not None and live.status == "waiting_actions" and day == live.current_day
-
-    agent_rows = [
-        {**agent, "kind_name": debugview.KIND_NAMES.get(agent["kind"], "?"), "plan": plan}
-        for agent, plan in zip(info["agents"], plans)
-    ]
-
-    return templates.TemplateResponse(
-        request=request,
-        name="algorithm.html",
-        context={
-            "nav": "algorithm",
-            "num_days": num_days,
-            "max_day": live.current_day if live is not None else num_days - 1,
-            "day": day,
-            "day_steps": match["daySteps"][day],
-            "agent_rows": agent_rows,
-            "plans_json": json.dumps(plans, ensure_ascii=False),
-            "plans_pretty": json.dumps(plans, ensure_ascii=False, indent=2),
-            "submittable": submittable,
-            "live": live is not None,
         },
     )
 
