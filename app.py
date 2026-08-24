@@ -10,12 +10,16 @@
 - GET  /api/replay       ビジュアライザ用: 全日の情報+全チームの行動計画一式
 - POST /api/new          新しいサンプル試合を生成（seed 等のパラメータ付き）
 - GET  /debug            サーバー内部を確認するデバッグ GUI（Jinja2）
+- POST /api/real/start   公式配布の簡易サーバー(procon-server)を起動して観戦開始
+- POST /api/real/stop    procon-server を停止
+- GET  /api/real/status  観戦データ（設定・日ごとのスナップショット・推定軌跡）
 
 本番サーバー同様 HTTP/1.1 で応答する（uvicorn の h11 実装）。
 
 起動:  python app.py   または   uvicorn app:app
 """
 
+import json
 import time
 from pathlib import Path
 from threading import Lock
@@ -28,6 +32,8 @@ from fastapi.templating import Jinja2Templates
 from visualizer import debugview
 from visualizer.hexaudon import PLAYER_NAME, HexaUdon, HexaUdonError
 from visualizer.hexgrid import apply_direction
+from visualizer.procon_process import DEFAULT_CONFIG, ProconProcess, ProconProcessError
+from visualizer.spectator import MatchSpectator
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -42,6 +48,10 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 _lock = Lock()
 _current: dict | None = None  # サンプルモードの試合データ（bundle）
 _live: HexaUdon | None = None  # ライブ対戦モードの試合（非 None ならライブモード）
+
+# ----- 本番用: 公式配布の簡易サーバー(procon-server)の観戦 -----
+_real_process = ProconProcess()
+_real_spectator: MatchSpectator | None = None
 
 
 def _get_current() -> dict:
@@ -459,6 +469,72 @@ def debug_requests(request: Request):
             "entries": entries,
         },
     )
+
+
+# ----- 本番用: 公式配布の簡易サーバー(procon-server)の起動・観戦 -----
+
+
+def _load_team_names(config_path: Path) -> list[str]:
+    try:
+        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+        return [t.get("name") or "" for t in data.get("teams", [])]
+    except Exception:
+        return []
+
+
+@app.post("/api/real/start")
+def real_start(
+    config: str = Query(
+        default=str(DEFAULT_CONFIG),
+        description="procon-server に渡す試合設定JSONのパス（省略時は配布サンプル）",
+    ),
+):
+    """公式配布の簡易サーバー(procon-server)を起動し、観戦を開始する。
+
+    試合の開始・終了はこのプロセスの起動・停止に対応する。procon-server が
+    内部で締切・試合開始・各日の進行をすべて管理するため、このAPIは
+    プロセスを立ち上げるだけでよい。
+    """
+    global _real_spectator
+    with _lock:
+        try:
+            config_path = Path(config)
+            base_url = _real_process.start(config_path=config_path)
+        except ProconProcessError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        # 観戦には1チーム分のトークンで足りる（GET / の others[] に全チームが載るため）
+        try:
+            teams = json.loads(config_path.read_text(encoding="utf-8"))["teams"]
+            token = teams[0]["token"]
+        except Exception as exc:
+            _real_process.stop()
+            raise HTTPException(
+                status_code=422, detail=f"設定JSONからトークンを読み取れません: {exc}"
+            )
+        _real_spectator = MatchSpectator(base_url, token, team_names=_load_team_names(config_path))
+    return {"ok": True, "baseUrl": base_url}
+
+
+@app.post("/api/real/stop")
+def real_stop():
+    """procon-server を停止する。"""
+    with _lock:
+        _real_process.stop()
+    return {"ok": True}
+
+
+@app.get("/api/real/status")
+def real_status():
+    """観戦データ（設定・日ごとのスナップショット・推定軌跡）を返す。
+
+    procon-server が起動していない場合は running: false のみを返す。
+    呼び出しごとに procon-server から最新状態を1回取得する（ポーリング用）。
+    """
+    with _lock:
+        if _real_spectator is None:
+            return {"running": False, "started": False}
+        _real_spectator.poll()
+        return {"started": True, "processAlive": _real_process.running, **_real_spectator.summary()}
 
 
 # フロントエンド（素の HTML/JS/CSS）。API ルートより後に mount する。
