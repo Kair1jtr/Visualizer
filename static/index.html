@@ -45,12 +45,17 @@
             <p>「試合サーバーを起動」を押すと、配布された <code>example.json</code> の設定で試合が始まります。</p>
           </div>
         </div>
-        <div id="day-note" class="event-ticker"></div>
+        <section class="panel-block">
+          <h2>推測経路</h2>
+          <p class="hint">車両（巡回車・補給車）の行をクリックすると、その車両の軌跡が盤面に半透明で表示されます。</p>
+          <div id="traj-panel"><p class="muted">試合開始後、チームを選択すると表示されます。</p></div>
+        </section>
       </section>
 
       <aside class="side-panel">
         <section class="panel-block">
           <h2>チーム</h2>
+          <p class="hint">クリックすると下の「推測経路」欄の対象チームが切り替わります。</p>
           <div id="teamlist"><p class="muted">試合開始後に表示されます。</p></div>
         </section>
 

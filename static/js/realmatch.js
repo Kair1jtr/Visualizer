@@ -3,7 +3,7 @@
 // 起動・停止ボタンはこの FastAPI アプリ自身に procon-server サブプロセスの
 // 起動/停止を依頼するためのもの（試合そのものへの操作ではない）。
 
-import { hexCenter, hexPointsAttr, boardSize } from './hex.js';
+import { hexCenter, hexPointsAttr, boardSize, idToRowCol } from './hex.js';
 import { teamColor, ROAD_STATE_COLOR, ROAD_STATE_LABEL, TERRAIN_LABEL, AGENT_TYPE_LABEL } from './palette.js';
 
 const $ = (id) => document.getElementById(id);
@@ -29,7 +29,15 @@ const state = {
   settingKey: null, // 静的レイヤーを再構築すべきか判定するためのキー
   selectedDay: null,
   followLatest: true,
+  selectedTeam: null, // 「推測経路」欄・軌跡ハイライトの対象チーム
+  selectedAgent: null, // 選択中チーム内で軌跡をハイライト表示するエージェント番号
 };
+
+// セルID -> "(x,y)" 表記（x=列, y=行）
+function cellXY(cell, width) {
+  const { row, col } = idToRowCol(cell, width);
+  return `(${col},${row})`;
+}
 
 let viewport = null;
 let layers = null;
@@ -241,14 +249,14 @@ function renderDay() {
 
     agents.forEach((a, ai) => {
       const row = traj ? traj[ai] : null;
-      const path = row ? row.path : [a.pos, a.pos];
       const endPos = row ? row.end : a.pos;
 
-      if (row && row.start !== row.end) {
-        const pts = path.map((c) => hexCenter(c, width, HEX));
+      // 選択中の車両（推測経路欄でクリックされたもの）だけ、半透明の軌跡を表示する
+      if (row && row.start !== row.end && tid === state.selectedTeam && ai === state.selectedAgent) {
+        const pts = row.path.map((c) => hexCenter(c, width, HEX));
         const line = el('polyline', {
           points: pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '),
-          class: 'traj-line',
+          class: 'traj-line traj-line-selected',
           stroke: color,
           fill: 'none',
         });
@@ -266,7 +274,11 @@ function renderDay() {
       const angle = (2 * Math.PI * slot) / (teams.length * Math.max(agents.length, 1));
       const ox = Math.cos(angle) * 5;
       const oy = Math.sin(angle) * 5;
-      const g = el('g', { class: `agent agent-${a.kind === 0 ? 'patrol' : 'supply'}`, transform: `translate(${x + ox},${y + oy})` });
+      const isSelected = tid === state.selectedTeam && ai === state.selectedAgent;
+      const g = el('g', {
+        class: `agent agent-${a.kind === 0 ? 'patrol' : 'supply'}${isSelected ? ' agent-selected' : ''}`,
+        transform: `translate(${x + ox},${y + oy})`,
+      });
       let shape;
       if (a.kind === 0) {
         shape = el('circle', { cx: 0, cy: 0, r: 7 });
@@ -285,17 +297,65 @@ function renderDay() {
     });
   }
 
-  const isLastKnownDay = day.day === Math.max(...(state.status.days ?? []).map((d) => d.day));
-  const noteEl = $('day-note');
-  if (!day.trajectories && isLastKnownDay) {
-    noteEl.textContent = state.status.phase === 'ended'
-      ? `${day.day + 1}日目（最終日）: 次の日のスナップショットが無いため、この日の移動軌跡は観測できません。表示位置は日開始時点のものです。`
-      : `${day.day + 1}日目: 進行中（次の日になるまで、この日の移動軌跡は確定しません）。表示位置は日開始時点のものです。`;
-  } else if (!day.trajectories) {
-    noteEl.textContent = `${day.day + 1}日目: 軌跡データがありません。`;
-  } else {
-    noteEl.textContent = `${day.day + 1}日目の軌跡は、日開始〜翌日開始の2時点から地形・道路状況をもとに推定した経路です（実際の経路と一致するとは限りません）。`;
+  renderTrajPanel(day);
+}
+
+// ----- 推測経路欄（選択中チームの車両ごとの出発点・到達点・経路） -----
+
+function renderTrajPanel(day) {
+  const root = $('traj-panel');
+  const teams = state.status?.teams ?? [];
+  if (!day || !teams.length) {
+    root.innerHTML = '<p class="muted">試合開始後、チームを選択すると表示されます。</p>';
+    return;
   }
+  const width = state.status.setting.map.width;
+  const team = teams.find((t) => t.id === state.selectedTeam) ?? teams[0];
+  state.selectedTeam = team.id;
+
+  const isLastKnownDay = day.day === Math.max(...(state.status.days ?? []).map((d) => d.day));
+  if (!day.trajectories) {
+    const msg = isLastKnownDay
+      ? (state.status.phase === 'ended'
+          ? `${day.day + 1}日目（最終日）: 次の日のスナップショットが無いため、この日の移動軌跡は観測できません。`
+          : `${day.day + 1}日目: 進行中（次の日になるまで、この日の移動軌跡は確定しません）。`)
+      : `${day.day + 1}日目: 軌跡データがありません。`;
+    root.innerHTML = `<p class="muted">${msg}</p>`;
+    return;
+  }
+
+  const agents = day.agentsByTeam[team.id] ?? [];
+  const rows = agents.map((a, ai) => {
+    const row = day.trajectories[team.id]?.[ai];
+    if (!row) return '';
+    const kindLabel = AGENT_TYPE_LABEL[a.kind === 0 ? 'patrol' : 'supply'];
+    const pathCells = row.path.filter((c, i) => i === 0 || c !== row.path[i - 1]);
+    const pathStr = pathCells.map((c) => cellXY(c, width)).join(', ');
+    const selected = ai === state.selectedAgent;
+    return `
+      <tr class="traj-row${selected ? ' selected' : ''}" data-agent="${ai}">
+        <td>${kindLabel}${ai + 1}</td>
+        <td>${cellXY(row.start, width)}</td>
+        <td>${cellXY(row.end, width)}</td>
+        <td class="traj-path">${pathStr}</td>
+      </tr>`;
+  }).join('');
+
+  root.innerHTML = `
+    <div class="traj-table-wrap">
+      <table class="traj-table">
+        <thead><tr><th>車両</th><th>出発点</th><th>到達点</th><th>経路</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  root.querySelectorAll('.traj-row').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      const ai = Number(tr.dataset.agent);
+      state.selectedAgent = state.selectedAgent === ai ? null : ai;
+      renderDay();
+    });
+  });
 }
 
 function agentTooltip(team, agent, ai, row) {
@@ -347,9 +407,25 @@ function renderTeamList() {
     root.innerHTML = '<p class="muted">試合開始後に表示されます。</p>';
     return;
   }
+  if (state.selectedTeam == null) state.selectedTeam = teams[0].id;
+
   root.innerHTML = teams
-    .map((t) => `<div class="score-row" style="cursor:default"><span class="chip" style="background:${teamColor(t.id)}"></span><span class="team-name">${t.name}</span></div>`)
+    .map((t) => {
+      const focused = t.id === state.selectedTeam ? ' focused' : '';
+      return `<button type="button" class="score-row${focused}" data-team="${t.id}"><span class="chip" style="background:${teamColor(t.id)}"></span><span class="team-name">${t.name}</span></button>`;
+    })
     .join('');
+
+  root.querySelectorAll('.score-row').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tid = Number(btn.dataset.team);
+      if (tid === state.selectedTeam) return;
+      state.selectedTeam = tid;
+      state.selectedAgent = null;
+      renderTeamList();
+      renderDay();
+    });
+  });
 }
 
 function renderSettingInfo() {
@@ -382,7 +458,7 @@ function renderLegend() {
     <div class="legend-group"><h3>地形</h3>${terrainRows}</div>
     ${teamRows ? `<div class="legend-group"><h3>チーム</h3>${teamRows}</div>` : ''}
     <div class="legend-group"><h3>凡例</h3>
-      <span class="legend-item">実線: 推定移動経路</span>
+      <span class="legend-item">半透明の実線: 選択中の車両の推測経路</span>
       <span class="legend-item">薄い輪: 日開始時点の位置</span>
     </div>`;
 }

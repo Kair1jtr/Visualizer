@@ -308,11 +308,72 @@ body {
   pointer-events: none;
 }
 
+.traj-line-selected {
+  stroke-width: 6;
+  stroke-dasharray: none;
+  opacity: 0.4;
+}
+
 .agent-start-ring {
   fill: none;
   stroke-width: 1.6;
   opacity: 0.45;
   pointer-events: none;
+}
+
+.agent-selected .agent-shape {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+/* ---- 推測経路テーブル（試合観戦ビュー） ---- */
+
+.traj-table-wrap {
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.traj-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.traj-table th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 4px 8px 4px 0;
+  background: var(--surface);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.traj-table td {
+  padding: 5px 8px 5px 0;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.traj-table td.traj-path {
+  white-space: normal;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.traj-row {
+  cursor: pointer;
+}
+
+.traj-row:hover td {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.traj-row.selected td {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .fuel-bg {
