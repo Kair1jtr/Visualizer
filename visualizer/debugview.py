@@ -133,7 +133,7 @@ def trace_plan(plan: list, start: int, match: dict, traffic_map: dict) -> dict:
 
 def _hex_center(cell: int, width: int, size: float) -> tuple[float, float]:
     row, col = divmod(cell, width)
-    x = size * SQRT3 * (col + 0.5 * (row & 1)) + size
+    x = size * SQRT3 * (col + 0.5 * ((row + 1) & 1)) + size
     y = size * 1.5 * row + size
     return x, y
 

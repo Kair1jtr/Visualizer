@@ -1,7 +1,8 @@
 """ヘキサうどん のマップ（六角形グリッド）座標計算。
 
 セル番号は行優先で 0 〜 (縦×横-1)。募集要項の図1の座標例と同じ並び。
-六角形は pointy-top、奇数行が右に半セルずれる odd-r オフセット配置。
+六角形は pointy-top、偶数行が右に半セルずれる even-r オフセット配置
+（公式Q&Aその1 Q1/A1で確定: 「偶数行が右にずれる形で固定されています」）。
 """
 
 # axial 座標系での6方向
@@ -21,7 +22,7 @@ DIRECTION_CODES = {
 
 def _to_axial(cell: int, width: int) -> tuple[int, int]:
     row, col = divmod(cell, width)
-    return col - (row - (row & 1)) // 2, row
+    return col - (row + (row & 1)) // 2, row
 
 
 def direction_code(src: int, dst: int, width: int) -> int | None:
@@ -42,7 +43,7 @@ def apply_direction(cell: int, code: int, width: int, height: int) -> int | None
     nq, nr = q + dq, r + dr
     if not 0 <= nr < height:
         return None
-    nc = nq + (nr - (nr & 1)) // 2
+    nc = nq + (nr + (nr & 1)) // 2
     if not 0 <= nc < width:
         return None
     return nr * width + nc
@@ -59,13 +60,13 @@ def rc_to_id(row: int, col: int, width: int) -> int:
 def neighbors(cell: int, width: int, height: int) -> list[int]:
     """セル cell に隣接する（盤内の）セル番号を返す。"""
     row, col = divmod(cell, width)
-    q = col - (row - (row & 1)) // 2
+    q = col - (row + (row & 1)) // 2
     result = []
     for dq, dr in _DIRECTIONS:
         nq, nr = q + dq, row + dr
         if not 0 <= nr < height:
             continue
-        nc = nq + (nr - (nr & 1)) // 2
+        nc = nq + (nr + (nr & 1)) // 2
         if 0 <= nc < width:
             result.append(nr * width + nc)
     return result

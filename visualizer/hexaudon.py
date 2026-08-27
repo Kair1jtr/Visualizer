@@ -9,15 +9,19 @@
 
 このクラス1つで以下の両方を動かす:
 - 模擬試合（AI同士の貪欲法対戦。`run()` で全日程を一括生成）
-- ライブ対戦 / Play GUI（`submit_kinds()` → `submit_actions()` を日ごとに
-  呼んで1日ずつ進める。チーム0が外部クライアント＝プレイヤー）
+- ライブ対戦（`submit_kinds()` → `submit_actions()` を日ごとに呼んで
+  1日ずつ進める。チーム0が外部クライアント＝プレイヤー）
 
-再現しているルール:
+再現しているルール（公式Q&A・補足資料で確定した反映フェーズ順序に準拠:
+燃料消費→移動反映→うどん獲得→燃料補給→交通量更新）:
 - 移動: 出発セルの地形で決まるステップ数・燃料を消費（巡回車のみ燃料消費）
 - 燃料切れ・日内ステップ不足時は待機
 - 補給車と巡回車が1ステップ以上同セルにいると燃料満タンまで補給
-- スポット: 1巡回車1スポット1日1玉、チームごとに独立した在庫、毎日補充
-- 道路: 前日・前々日の全チーム滞在ステップ数÷チーム数で順調/混雑/渋滞が決まる
+- スポット: 1巡回車1スポット1日1玉、チームごとに独立した在庫、毎日補充。
+  到着時に限らず、日をまたいでスポット上に留まっている場合も
+  1ステップ目以降に獲得できる（Q&Aその1 Q7/A7・Q8/A8）
+- 道路: 前日・前々日の全チーム滞在ステップ数÷チーム数で順調/混雑/渋滞が決まる。
+  滞在数は移動反映後のセルをカウント（Q&Aその2 Q27/A27）
 - 勝敗: 種類数 → 日ごとの種類数の累積 → 玉数 →（回答時間は模擬対象外）
 """
 
@@ -246,8 +250,11 @@ class HexaUdon:
             if team.stock.get(cell, 0) <= 0 or cell in agent.acquired_today:
                 continue
             if cell == agent.cell:
-                # うどん獲得は「到着」時のみ発火するため、現在いるセルは
-                # 一度離れて戻る必要がある。目的地としては除外する。
+                # 現在いるセルへの移動経路は存在しない（既にそこにいる）ため
+                # 移動先の候補からは除外する。獲得自体は execute_day 側で
+                # 到着有無に関わらず毎ステップ判定される（日をまたいで
+                # スポット上に留まっている場合も1ステップ目以降に獲得できる。
+                # Q&Aその1 Q7/A7・Q8/A8で確定）。
                 continue
             claimed = team.claims.get(cell)
             if claimed is not None and claimed != agent_idx and team.stock[cell] <= 1:
@@ -484,13 +491,8 @@ class HexaUdon:
                     if agent.move_remaining == 0:
                         actions[ti][ai].append(-1)
 
-            # 交通量（このステップ中に道路セルへ滞在したエージェント数）
-            for team in self._teams:
-                for agent in team.agents:
-                    if terrain[agent.cell] == "road":
-                        traffic[agent.cell] = traffic.get(agent.cell, 0) + 1
-
-            # 移動の進行と到着処理
+            # 移動の反映（公式の反映フェーズ順序: 燃料消費[行動決定時に済]→移動反映→
+            # うどん獲得→燃料補給→交通量更新。Q&Aその1 Q6/A6・補足資料で確定）
             for ti, team in enumerate(self._teams):
                 for ai, agent in enumerate(team.agents):
                     if agent.move_remaining <= 0:
@@ -500,6 +502,12 @@ class HexaUdon:
                         continue
                     agent.cell = agent.move_target
                     agent.move_target = None
+
+            # うどん獲得: 移動で到着したか否かに関わらず、現在地がスポットなら判定する
+            # （日をまたいでスポット上に留まっている場合も1ステップ目以降に獲得できる。
+            # Q&Aその1 Q7/A7・Q8/A8で確定）
+            for ti, team in enumerate(self._teams):
+                for agent in team.agents:
                     if agent.kind != "patrol":
                         continue
                     spot = self._spots_by_cell.get(agent.cell)
@@ -535,6 +543,12 @@ class HexaUdon:
                             agent.fuel = self.fuelLimits
                             agent.waiting_fuel = False
                             break
+
+            # 交通量（移動反映後のセルへの滞在をカウント。Q&Aその2 Q27/A27で確定）
+            for team in self._teams:
+                for agent in team.agents:
+                    if terrain[agent.cell] == "road":
+                        traffic[agent.cell] = traffic.get(agent.cell, 0) + 1
 
         for team in self._teams:
             team.daily_series_counts.append(len(team.series_today))

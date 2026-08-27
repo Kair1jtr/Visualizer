@@ -1,5 +1,6 @@
-// 六角形グリッド描画用の座標計算（odd-r オフセット / pointy-top）。
+// 六角形グリッド描画用の座標計算（even-r オフセット / pointy-top）。
 // セル番号は行優先 0〜(縦×横-1) で、募集要項 図1 の座標例と一致する。
+// 偶数行が右に半セルずれる（公式Q&Aその1 Q1/A1で確定）。
 
 export function idToRowCol(id, width) {
   return { row: Math.floor(id / width), col: id % width };
@@ -8,7 +9,7 @@ export function idToRowCol(id, width) {
 // セル中心のピクセル座標。size は中心から頂点までの距離。
 export function hexCenter(id, width, size) {
   const { row, col } = idToRowCol(id, width);
-  const x = size * Math.sqrt(3) * (col + 0.5 * (row & 1)) + size;
+  const x = size * Math.sqrt(3) * (col + 0.5 * ((row + 1) & 1)) + size;
   const y = size * 1.5 * row + size;
   return { x, y };
 }
@@ -39,7 +40,7 @@ const DIRECTION_CODES = [
 function toAxial(cell, width) {
   const row = Math.floor(cell / width);
   const col = cell % width;
-  return [col - (row - (row & 1)) / 2, row];
+  return [col - (row + (row & 1)) / 2, row];
 }
 
 // セル cell から方向コード code へ1セル移動した先。盤外は null。
@@ -49,7 +50,7 @@ export function applyDirection(cell, code, width, height) {
   const nq = q + dq;
   const nr = r + dr;
   if (nr < 0 || nr >= height) return null;
-  const nc = nq + (nr - (nr & 1)) / 2;
+  const nc = nq + (nr + (nr & 1)) / 2;
   if (nc < 0 || nc >= width) return null;
   return nr * width + nc;
 }
