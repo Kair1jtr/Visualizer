@@ -801,3 +801,45 @@ body {
   padding: 1px 5px;
   border-radius: 4px;
 }
+
+/* ---- シミュレーター観戦 (sim.html) ---- */
+
+.step-controls {
+  justify-content: flex-start;
+}
+
+.step-controls.hidden {
+  display: none;
+}
+
+.step-controls #step-slider {
+  flex: 1 1 160px;
+  min-width: 120px;
+  accent-color: var(--accent);
+}
+
+.sim-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+
+#sim-strategy {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.policy-list {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  font-variant-numeric: tabular-nums;
+}

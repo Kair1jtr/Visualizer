@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ヘキサうどん シミュレーター観戦</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🧪%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="app-title">
+        <h1>ヘキサうどん <span class="subtitle">シミュレーター観戦</span></h1>
+        <p class="tagline">
+          公式ルールを忠実に再現したシミュレーター（<code>simulator/</code>）で1試合を走らせ、
+          本番試合観戦と同じ盤面で表示します。軌跡は推定ではなく<b>実測</b>で、
+          ステップ単位で再生できます。
+        </p>
+      </div>
+      <div class="app-actions">
+        <label class="sim-field">
+          戦略
+          <select id="sim-strategy">
+            <option value="greedy">全チーム 貪欲法</option>
+            <option value="greedy,stay">P0 貪欲法 / P1 待機</option>
+            <option value="stay">全チーム 待機</option>
+          </select>
+        </label>
+        <button id="btn-start" class="btn btn-primary">実行</button>
+        <button id="btn-stop" class="btn" disabled>結果を破棄</button>
+        <a class="btn" href="./">本番試合観戦</a>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section class="board-panel">
+        <div class="board-toolbar">
+          <div id="real-status" class="status-line">まだ実行していません。</div>
+          <div class="zoom-controls">
+            <button id="btn-zoom-out" class="btn btn-icon" title="縮小">－</button>
+            <button id="btn-zoom-reset" class="btn btn-icon" title="表示リセット">⟲</button>
+            <button id="btn-zoom-in" class="btn btn-icon" title="拡大">＋</button>
+          </div>
+        </div>
+        <div class="board-toolbar">
+          <div class="day-tabs" id="day-tabs"></div>
+          <button id="btn-latest" class="btn btn-icon" title="最新日に戻る">⏭ 最新</button>
+        </div>
+        <div class="board-toolbar step-controls hidden" id="step-controls">
+          <button id="btn-step-prev" class="btn btn-icon" title="1ステップ戻る">◀</button>
+          <button id="btn-step-play" class="btn btn-icon" title="再生／停止">▶ 再生</button>
+          <button id="btn-step-next" class="btn btn-icon" title="1ステップ進む">▶</button>
+          <input id="step-slider" type="range" min="0" max="0" value="0" />
+          <span id="step-label" class="step-readout"></span>
+          <button id="btn-step-end" class="btn btn-icon" title="その日の最後へ">⏭</button>
+        </div>
+        <div class="board-wrap" id="board-wrap">
+          <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="tooltip" class="tooltip hidden"></div>
+          <div id="board-empty" class="board-empty">
+            <p>「実行」を押すと、<code>server/試合設定用JSONファイル/example.json</code> の設定で
+               シミュレーターが全日程を走らせます（実時間の締切が無いので一瞬で終わります）。</p>
+          </div>
+        </div>
+        <section class="panel-block">
+          <h2>実測経路</h2>
+          <p class="hint">車両（巡回車・補給車）の行をクリックすると、その車両の軌跡が盤面に半透明で表示されます。
+            ステップ再生中は、そのステップまでに通ったセルだけを表示します。</p>
+          <div id="traj-panel"><p class="muted">実行後、チームを選択すると表示されます。</p></div>
+        </section>
+      </section>
+
+      <aside class="side-panel">
+        <section class="panel-block">
+          <h2>チーム</h2>
+          <p class="hint">クリックすると下の「実測経路」欄の対象チームが切り替わります。</p>
+          <div id="teamlist"><p class="muted">実行後に表示されます。</p></div>
+        </section>
+
+        <section class="panel-block">
+          <h2>得点</h2>
+          <div id="score-panel"><p class="muted">実行後に表示されます。</p></div>
+        </section>
+
+        <section class="panel-block">
+          <h2>試合設定</h2>
+          <div id="setting-info"><p class="muted">実行後に表示されます。</p></div>
+        </section>
+
+        <section class="panel-block">
+          <h2>採用中の仮仕様</h2>
+          <p class="hint">公式資料だけでは決まらない項目。<code>simulator/policies.py</code> で切り替えられます。</p>
+          <div id="policy-info"><p class="muted">実行後に表示されます。</p></div>
+        </section>
+
+        <section class="panel-block">
+          <h2>凡例</h2>
+          <div id="legend"></div>
+        </section>
+
+        <section class="panel-block">
+          <h2>この画面について</h2>
+          <p class="muted">
+            <a href="./">本番試合観戦</a>との違いは、盤面を動かしているのが
+            公式簡易サーバーではなく <code>simulator/</code> であることです。
+            シミュレーターは全ステップの状態を保持しているため、
+            軌跡は推定ではなく実測で、日中の途中経過も再生できます。
+            反映フェーズの5処理（燃料消費 → 移動 → うどん獲得 → 補給 → 交通量更新）と
+            その順序、0ステップ目・最終ステップの扱いは公式Q&Aどおりに実装されています。
+          </p>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="app-footer">
+      <p>
+        シミュレーター観戦。実サーバーの進行を見る場合は
+        <a href="./">本番試合観戦</a>を使ってください。
+      </p>
+    </footer>
+  </div>
+
+  <script type="module" src="./js/simmatch.js"></script>
+</body>
+</html>

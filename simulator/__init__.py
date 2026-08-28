@@ -30,6 +30,7 @@ from .engine import (
     traffic_volume,
 )
 from .grid import HexGrid, build_grid
+from .pathfinding import dijkstra, directions_from, path_cells, route
 from .policies import (
     DEFAULT_POLICIES,
     AgentOrder,
@@ -49,6 +50,7 @@ from .state import (
     TeamState,
     TrafficState,
 )
+from .strategy import STRATEGIES, greedy_team_plan, stay_team_plan
 from .terrain import AgentKind, RoadStatus, Terrain, move_cost
 from .tracing import Tracer, map_ascii, snapshot
 from .validation import validate_all, validate_kinds, validate_team_plan
@@ -68,6 +70,13 @@ __all__ = [
     "traffic_volume",
     "HexGrid",
     "build_grid",
+    "dijkstra",
+    "directions_from",
+    "path_cells",
+    "route",
+    "STRATEGIES",
+    "greedy_team_plan",
+    "stay_team_plan",
     "DEFAULT_POLICIES",
     "AgentOrder",
     "CellIndexing",

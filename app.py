@@ -13,6 +13,9 @@
 - POST /api/real/start   公式配布の簡易サーバー(procon-server)を起動して観戦開始
 - POST /api/real/stop    procon-server を停止
 - GET  /api/real/status  観戦データ（設定・日ごとのスナップショット・推定軌跡）
+- POST /api/sim/start    公式ルール忠実シミュレーター(simulator/)で1試合を実行
+- POST /api/sim/stop     シミュレーション結果を破棄
+- GET  /api/sim/status   観戦データ（/api/real/status と同じ形。軌跡は実測）
 
 本番サーバー同様 HTTP/1.1 で応答する（uvicorn の h11 実装）。
 
@@ -33,6 +36,8 @@ from visualizer import debugview
 from visualizer.hexaudon import PLAYER_NAME, HexaUdon, HexaUdonError
 from visualizer.hexgrid import apply_direction
 from visualizer.procon_process import DEFAULT_CONFIG, ProconProcess, ProconProcessError
+from visualizer.sim_spectator import DEFAULT_CONFIG as SIM_DEFAULT_CONFIG
+from visualizer.sim_spectator import SimSpectator, SimSpectatorError, run_simulation
 from visualizer.spectator import MatchSpectator
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -52,6 +57,10 @@ _live: HexaUdon | None = None  # ライブ対戦モードの試合（非 None �
 # ----- 本番用: 公式配布の簡易サーバー(procon-server)の観戦 -----
 _real_process = ProconProcess()
 _real_spectator: MatchSpectator | None = None
+
+# ----- 公式ルール忠実シミュレーター(simulator/)の観戦 -----
+_sim_spectator: SimSpectator | None = None
+_sim_runs = 0  # 実行ごとに増える。盤面を作り直すべきかの判定に使う
 
 
 def _get_current() -> dict:
@@ -535,6 +544,61 @@ def real_status():
             return {"running": False, "started": False}
         _real_spectator.poll()
         return {"started": True, "processAlive": _real_process.running, **_real_spectator.summary()}
+
+
+# ---------------------------------------------------------------------------
+# 公式ルール忠実シミュレーター(simulator/)の観戦
+#
+# 実時間の締切が無いため試合は一瞬で終わる。/api/sim/start で全日程を走らせ、
+# /api/sim/status がその結果を返す（形は /api/real/status と同じ）。
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/sim/start")
+def sim_start(
+    config: str = Query(
+        default=str(SIM_DEFAULT_CONFIG),
+        description="試合設定JSONのパス（procon-server に渡すのと同じ形式）",
+    ),
+    strategy: str = Query(
+        default="greedy",
+        description="戦略。チームごとに変える場合はカンマ区切り（例: greedy,stay）",
+    ),
+):
+    """シミュレーターで1試合を最後まで実行し、観戦データを作る。
+
+    公式簡易サーバーと同じ設定JSONを読むので、同じ試合を
+    「実サーバーで動かした結果」と「シミュレーターで動かした結果」で見比べられる。
+    """
+    global _sim_spectator, _sim_runs
+    with _lock:
+        _sim_runs += 1
+        try:
+            _sim_spectator = run_simulation(
+                Path(config), strategy=strategy, run_key=_sim_runs
+            )
+        except SimSpectatorError as exc:
+            _sim_spectator = None
+            raise HTTPException(status_code=422, detail=str(exc))
+        return {"ok": True, "days": len(_sim_spectator.days)}
+
+
+@app.post("/api/sim/stop")
+def sim_stop():
+    """シミュレーション結果を破棄する。"""
+    global _sim_spectator
+    with _lock:
+        _sim_spectator = None
+    return {"ok": True}
+
+
+@app.get("/api/sim/status")
+def sim_status():
+    """観戦データを返す。`/api/real/status` と同じ形（軌跡は推定ではなく実測）。"""
+    with _lock:
+        if _sim_spectator is None:
+            return {"running": False, "started": False}
+        return _sim_spectator.summary()
 
 
 # フロントエンド（素の HTML/JS/CSS）。API ルートより後に mount する。

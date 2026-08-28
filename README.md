@@ -6,11 +6,20 @@
 1. **本番試合観戦**: 配布された公式簡易サーバー（`procon-server`）をサブ
    プロセスとして起動・停止し、その進行状況（各チームの位置・推定移動軌跡）を
    ブラウザで観戦できます（トップページ `/`）。
-2. **オフラインシミュレーター**: 公式資料「競技部門『ヘキサうどん』の
-   フォーマットについて」に準拠した JSON を返すモックサーバー (FastAPI) と、
-   試合をステップ単位で再生できるブラウザ UI です。盤面が極端に小さい・
-   要素数が少ないなど、公式サーバーでは作れないテストケースを手元で
-   自由に生成して確認する用途に使います（`/simulator.html`）。
+2. **シミュレーター観戦**: 公式ルールを忠実に再現したシミュレーター
+   （`simulator/`）で1試合を走らせ、**1と同じ盤面**で表示します
+   （`/sim.html`）。公式簡易サーバーに渡すのと同じ設定 JSON を読むので、
+   同一設定の試合を実サーバー版とシミュレーター版で見比べられます。
+   シミュレーターは全ステップの状態を保持しているため、軌跡は推定ではなく
+   **実測**で、日中の途中経過をステップ単位で再生できます。
+
+> **旧モックサーバー (`/simulator.html`, `/watch.html`, `/api/match` 系) について**:
+> 2 の登場前は、独自エンドポイントのモックサーバーがビジュアライザの
+> バックエンドでした。こちらは公式ルールを完全には再現しておらず
+> （燃料不足の移動を「補給されるまで待機」として実行してしまう。公式は
+> 回答全体をリジェクトする〔要項〕〔Q6〕）、役割は 2 に引き継がれています。
+> 既存の依存があるため削除はしていませんが、**新規の検討には `/sim.html` を
+> 使ってください**。
 
 > ルールの概要と API エンドポイント仕様の一覧は [SPEC.md](SPEC.md) にまとめています。
 
@@ -27,8 +36,8 @@ uvicorn app:app --http h11
 
 - 本番試合を観戦する場合: ブラウザで http://127.0.0.1:8000 を開き、
   「試合サーバーを起動」を押してください。
-- オフラインシミュレーターを使う場合: http://127.0.0.1:8000/simulator.html を開き、
-  「サンプル試合を生成」を押してください。
+- シミュレーターで見る場合: http://127.0.0.1:8000/sim.html を開き、
+  「実行」を押してください。
 
 ## 本番試合観戦 (`/`)
 
@@ -61,10 +70,44 @@ uvicorn app:app --http h11
   取得できません**。観戦中に取得できた日ごとのスナップショットのみが
   `GET /api/real/status` に残り続けます。
 
-## シミュレーターAPI（公式フォーマット準拠のモック）
+## シミュレーター観戦 (`/sim.html`)
+
+公式ルール忠実シミュレーター（`simulator/`）で1試合を最後まで走らせ、
+本番試合観戦とまったく同じ盤面で表示します。実時間の締切が無いので
+「実行」を押すと全日程が一瞬で終わります。
+
+| メソッド/パス | 内容 |
+|---|---|
+| `POST /api/sim/start?config=<path>&strategy=<name>` | シミュレーターで1試合を実行する。`config` は `procon-server` に渡すのと同じ設定JSON（省略時は配布サンプル）。`strategy` は `greedy` / `stay`、チームごとに変えるならカンマ区切り（例: `greedy,stay`） |
+| `POST /api/sim/stop` | 実行結果を破棄する |
+| `GET /api/sim/status` | 観戦データを返す。**`GET /api/real/status` と同じ形** |
+
+レスポンスの形を実サーバー版と揃えてあるため、ブラウザ側は同じ描画コード
+（`static/js/matchview.js`）で両方を表示します。違いは次の3点です。
+
+| | 本番試合観戦 `/` | シミュレーター観戦 `/sim.html` |
+|---|---|---|
+| 盤面を動かすもの | 公式簡易サーバー `procon-server` | `simulator/`（公式ルール忠実） |
+| 移動軌跡 | **推定**（日をまたぐ2点を Dijkstra で結ぶ） | **実測**（全ステップの状態を保持） |
+| 途中経過 | 見られない（各日のスナップショットのみ） | ステップ単位で再生できる |
+
+シミュレーター側だけの追加情報として、日ごとの得点（①種類数 ②日ごと種類数の
+累積 ③玉数）、道路セルごとの交通量、リジェクト理由、採用中の仮仕様
+（`simulator/policies.py` の U-1／U-3／U-4／U-5／U-6）も表示されます。
+
+行動計画は `simulator/strategy.py` の参照戦略が組み立てます。
+
+| 戦略 | 内容 |
+|---|---|
+| `greedy` | 「まだ取っていない系列 > 今日まだ取っていない系列 > 取得済み系列」の順に価値をつけ、価値÷距離が最大のスポットへ向かう。補給車は最も燃料が少ない巡回車の到達予定地へ向かう |
+| `stay` | 全エージェントがその日ずっと待機（比較の基準線） |
+
+## シミュレーターAPI（公式フォーマット準拠のモック・旧実装）
 
 以下は本番の `procon-server` とは無関係の、このアプリ内蔵のモック実装です。
-極端に小さい盤面など独自のテストケースを手元で試したい場合に使います。
+`/sim.html` の登場前に使っていたもので、**公式ルールを完全には再現して
+いません**（燃料不足の移動を「補給されるまで待機」として実行する）。
+既存の依存があるため残していますが、新規の検討には `/sim.html` を使ってください。
 
 | メソッド/パス | 内容 |
 |---|---|
@@ -102,9 +145,10 @@ GET  /api/replay              全記録（ビジュアライザで観戦可能�
 - 実行中の燃料切れの移動は「補給されるまで待機」として扱われ、
   実際に実行された行動が記録されます。
 - 途中経過も「**現在の試合を表示**」ボタンやデバッグ GUI でいつでも確認できます。
-- 対戦クライアントの実装例: `python examples/client.py --seed 42`
-  （通信手順と行動計画の組み立て方の見本。貪欲戦略で全日程を自動プレイ。
-  戦略部分は `algorithm/template.py` を参照・改造）
+- 対戦クライアントの実装例: `examples/client.py`（通信手順の見本）。
+  ただし削除済みの `algorithm/` に依存しているため、現状そのままでは動かない。
+  行動計画の組み立て方は `simulator/strategy.py`（貪欲法）と
+  `simulator/pathfinding.py`（その日の道路状態を反映した Dijkstra）を参照。
 
 ### 観戦専用ビュー: Watch (`/watch.html`)
 
@@ -166,7 +210,11 @@ GET  /api/replay              全記録（ビジュアライザで観戦可能�
 `info`（位置・燃料）および `meta.expected`（最終スコア）と突き合わせ、不一致が
 あればコンソールに警告を出します。
 
-## 再現している競技ルール
+## 旧モックが再現している競技ルール
+
+> 公式ルールを忠実に再現しているのは `simulator/` のほうです（`/sim.html`）。
+> ここに挙げるのは旧モック (`visualizer/hexaudon.py`) の再現範囲で、
+> 燃料不足の扱いなど公式と異なる点があります。
 
 - 移動コスト: 平地2/山地3/道路1〜4ステップ（順調・混雑・渋滞）、池は進入不可
 - 燃料: 平地1/山地2/道路2 を**出発セルの地形**で消費（巡回車のみ）
@@ -176,7 +224,7 @@ GET  /api/replay              全記録（ビジュアライザで観戦可能�
   `busyThreshold` / `jammedThreshold` と比較して決定（初日は全て順調）
 - 勝敗: ①種類数 → ②日ごとの種類数の累積 → ③玉数（④回答時間は模擬対象外）
 
-## UI の使い方
+## 旧モックビジュアライザ (`/simulator.html`) の使い方
 
 - **日タブ / スライダー / ▶** で任意の日・ステップへ。Space=再生/停止、←→=1ステップ移動
 - **スコアの行をクリック**すると、盤面のスポット在庫表示がそのチーム視点になります
@@ -187,46 +235,48 @@ GET  /api/replay              全記録（ビジュアライザで観戦可能�
 ## 構成
 
 ```
-app.py                     FastAPI サーバー（本番観戦API + シミュレーターAPI + デバッグGUI + 静的配信）
+app.py                     FastAPI サーバー（本番観戦API + シミュレーター観戦API
+                           + 旧モックAPI + デバッグGUI + 静的配信）
 server/
   簡易サーバー/             配布された procon-server バイナリ（各OS/CPU版）
-  試合設定用JSONファイル/   procon-server に渡す試合設定（既定: example.json）
-algorithm/
-  template.py              行動計画アルゴリズムのテンプレート（試合状況→
-                           移動JSON）。貪欲法の実装例つき。CLIでも実行可能
-  plan_builder.py          move()/wait()/goto() で行動計画を組み立てる
-                           ビルダー（JSONの方向コードを直接書かずに済む）
-  example_manual.py        plan_builder.py の使い方サンプル（通信ループ込み、
-                           そのまま実行してライブ対戦をプレイできる）
-  README.md                algorithm/ の使い方
+  試合設定用JSONファイル/   試合設定。procon-server とシミュレーターの
+                           両方がこの同じファイルを読む（既定: example.json）
+simulator/                 公式ルール忠実シミュレーター（通信を含まない純粋なロジック）
+  engine.py                反映フェーズ／アクションフェーズ・日・試合の進行
+  validation.py            受付時検証（構造 → 歩行 → 燃料 dry-run）
+  grid.py                  セル番号・座標・隣接関係（even-r）
+  pathfinding.py           その日の道路状態を反映した六角グリッド上の Dijkstra
+  strategy.py              参照戦略（貪欲法／待機）。ルールではなく攻略側の層
+  policies.py              未確定仕様の切り替え（U-1/U-3/U-4/U-5/U-6）
+  （ほか state.py / actions.py / terrain.py / tracing.py / scenarios.py / compare.py）
 visualizer/
   procon_process.py        procon-server（配布バイナリ）のサブプロセス起動・停止
   spectator.py             procon-server をポーリングして観戦データを構築
                            （日ごとのスナップショット保持・軌跡のDijkstra推定）
-  hexgrid.py               六角形グリッド（odd-r）座標・方向コード変換
-  pathfinding.py           地形コスト付き Dijkstra
-  mapgen.py                マップ自動生成（連結性保証つき）
-  hexaudon.py              シミュレーター用: 試合を表す HexaUdon クラス
-                           （公式フォーマットのキーと同名フィールドを持ち、
-                           模擬試合・ライブ対戦両方をこのクラス1つで実行する）
+  sim_spectator.py         simulator/ の試合を spectator.py と同じ形の JSON に
+                           変換する観戦アダプタ（軌跡は実測・ステップ記録つき）
+  hexgrid.py               六角形グリッド（even-r）座標・方向コード変換（旧モック用）
+  pathfinding.py           地形コスト付き Dijkstra（旧モック用）
+  mapgen.py                マップ自動生成（連結性保証つき、旧モック用）
+  hexaudon.py              旧モックサーバー用: 試合を表す HexaUdon クラス
+                           （公式ルール非準拠。README 冒頭の注記を参照）
   debugview.py             デバッグ GUI 用: SVG 描画・計画トレース・API ログ記録
 templates/
   base.html ほか           デバッグ GUI（Jinja2: 概要 / 日別 / リクエストログ）
+tests/                     simulator/ と観戦アダプタのテスト（unittest, 96件）
 examples/
-  client.py                シミュレーターのライブ対戦向けサンプルクライアント
-                           （algorithm/template.py の貪欲戦略を通信ループに
-                           組み込んだもの）
+  simulator_demo.py        simulator/ の公式例の再生・戦略比較デモ（CLI）
+  client.py                旧モックのライブ対戦向けサンプルクライアント
 static/
-  index.html               本番試合観戦ビュー（procon-serverの起動・停止 + 閲覧、トップページ `/`）
-  simulator.html / style.css  シミュレーター用ビジュアライザ UI（ライト/ダーク対応）
-  watch.html               シミュレーター用 Watch（新しい試合を自動検知して自動再生）
-  js/realmatch.js          試合観戦ビューの結線（ポーリング・盤面/軌跡描画）
-  js/replay.js             公式データからの試合再生エンジン（シミュレーター用）
-  js/render.js             SVG 盤面レンダラー（パン/ズーム・ツールチップ）
-  js/timeline.js           再生コントローラー
-  js/main.js               画面の結線・スコア/凡例/詳細パネル
-  js/watch.js              Watch の結線（ポーリングで新試合を検知・自動再生）
-  js/hex.js / js/palette.js  六角形座標計算・配色（本番観戦/シミュレーター共用）
+  index.html               本番試合観戦ビュー（procon-serverの起動・停止 + 閲覧、`/`）
+  sim.html                 シミュレーター観戦ビュー（`/sim.html`）
+  style.css                共通スタイル（ライト/ダーク対応）
+  js/matchview.js          観戦ビューの描画本体（index.html と sim.html で共用）
+  js/realmatch.js          matchview に /api/real/* を渡すだけの薄い結線
+  js/simmatch.js           matchview に /api/sim/* を渡すだけの薄い結線
+  js/hex.js / js/palette.js  六角形座標計算（even-r）・配色
+  simulator.html / watch.html  旧モック用ビジュアライザ UI（残置）
+  js/main.js / replay.js / render.js / timeline.js / watch.js  旧モック用（残置）
 ```
 
 ## 備考
