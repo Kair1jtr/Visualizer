@@ -205,7 +205,19 @@ class GameState:
 
     def __post_init__(self) -> None:
         if not self._spot_by_cell:
-            self._spot_by_cell = {s.pos: s for s in self.spots}
+            # 1セルに配置されるスポットは1つまで 〔Q18〕〔Q34〕【確定】。
+            # 重複を黙って握りつぶすと、片方のスポットが存在しないことになり
+            # 結果が静かに狂うため、入力段階で弾く。
+            seen: dict[int, SpotDef] = {}
+            for spot in self.spots:
+                if spot.pos in seen:
+                    raise ValueError(
+                        f"1セルに複数のスポットが指定されています（セル {spot.pos}: "
+                        f"系列 {seen[spot.pos].brand} と {spot.brand}）。"
+                        f"1セルのスポットは1つまでです〔Q18〕〔Q34〕"
+                    )
+                seen[spot.pos] = spot
+            self._spot_by_cell = seen
 
     def spot_at(self, cell: int) -> SpotDef | None:
         return self._spot_by_cell.get(cell)

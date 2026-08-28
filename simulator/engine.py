@@ -154,7 +154,7 @@ class InsufficientFuel(PlanError):
     """燃料が不足する移動。回答全体をリジェクトする。〔要項〕〔Q6〕【確定】"""
 
 
-def reflection_phase(state: GameState, tracer: Tracer | None = None, *, strict: bool = True) -> None:
+def reflection_phase(state: GameState, tracer: Tracer | None = None) -> None:
     """反映フェーズ。1〜5 の順序は公式が定めたもので入れ替えてはならない。"""
     cfg = state.config
     grid = state.grid
@@ -169,13 +169,14 @@ def reflection_phase(state: GameState, tracer: Tracer | None = None, *, strict: 
             continue
         if agent.fuel < r.fuel_cost:
             # 〔要項〕「燃料が足りない場合に移動の命令を与えた場合は，無効な回答」
-            if strict:
-                raise InsufficientFuel(
-                    f"燃料不足の移動です（セル {agent.pos} から必要燃料 {r.fuel_cost}、"
-                    f"保有 {agent.fuel}）",
-                    team_id=team.team_id,
-                    agent_id=agent.agent_id,
-                )
+            # 検証を通った計画ならここには来ない。到達した場合は入力が不正なので
+            # 必ず送出する（黙って燃料を負にしない）。
+            raise InsufficientFuel(
+                f"燃料不足の移動です（セル {agent.pos} から必要燃料 {r.fuel_cost}、"
+                f"保有 {agent.fuel}）",
+                team_id=team.team_id,
+                agent_id=agent.agent_id,
+            )
         before = agent.fuel
         agent.fuel -= r.fuel_cost
         r.fuel_consumed = True
@@ -250,7 +251,7 @@ def reflection_phase(state: GameState, tracer: Tracer | None = None, *, strict: 
 # ---------------------------------------------------------------------------
 
 
-def action_phase(state: GameState, tracer: Tracer | None = None, *, strict: bool = True) -> None:
+def action_phase(state: GameState, tracer: Tracer | None = None) -> None:
     """アクションフェーズ。次の行動（移動 or 待機）を予約する。〔Q6〕【確定】
 
     移動を予約した時点では燃料を消費しない〔Q6〕【確定】
@@ -262,7 +263,16 @@ def action_phase(state: GameState, tracer: Tracer | None = None, *, strict: bool
         if agent.reserved is not None:
             continue  # 移動中／待機中は新たな命令を出せない 〔Q23〕〔Q24〕【確定】
         if agent.plan_cursor >= len(agent.plan):
-            continue  # 行動計画を消化済み（検証を通っていれば日は終わっている）
+            # 日がまだ終わっていないのに計画を消化しきった＝ステップ合計が
+            # その日のステップ数に満たない。〔書式〕により不正な回答なので送出する
+            # （黙って待機で埋めない）。
+            raise PlanError(
+                f"行動計画のステップ合計がその日のステップ数に足りません"
+                f"（{state.step} ステップ目で計画を消化しきった、"
+                f"その日は {state.steps_today} ステップ）",
+                team_id=team.team_id,
+                agent_id=agent.agent_id,
+            )
         value = agent.plan[agent.plan_cursor]
         agent.plan_cursor += 1
 
@@ -298,7 +308,7 @@ def action_phase(state: GameState, tracer: Tracer | None = None, *, strict: bool
         )
         # U-6 が ON_RESERVATION の場合のみ、ここで消費する（〔Q6〕には反する対照用）
         if agent.is_patrol and cfg.policies.fuel_timing is FuelTiming.ON_RESERVATION:
-            if agent.fuel < cost and strict:
+            if agent.fuel < cost:
                 raise InsufficientFuel(
                     f"燃料不足の移動です（セル {agent.pos} から必要燃料 {cost}、保有 {agent.fuel}）",
                     team_id=team.team_id,
@@ -335,7 +345,36 @@ def begin_day(state: GameState, tracer: Tracer | None = None) -> None:
 
 
 def end_day(state: GameState, tracer: Tracer | None = None) -> None:
-    """日終了処理。状態設計書 第11.2節。〔要項〕【確定】"""
+    """日終了処理。状態設計書 第11.2節。〔要項〕【確定】
+
+    事後条件として、各エージェントが行動計画を過不足なく消化したことを確認する。
+    〔書式〕「各エージェントの行動計画は1日のステップ数と一致する必要がある」【確定】
+    に反する計画は、次のいずれかの形で検出できる:
+
+      - 日終了時に**未完了の行動が残っている**（最後の移動が日をはみ出した）
+      - 日終了時に**未消化のコマンドが残っている**（合計が日のステップ数を超えた）
+
+    （逆に合計が足りない場合は、アクションフェーズで計画を消化しきった時点で
+    検出される。engine.action_phase() 参照）
+    """
+    for team in state.teams:
+        for agent in team.agents:
+            if agent.reserved is not None:
+                raise PlanError(
+                    f"行動計画のステップ合計がその日のステップ数を超えています"
+                    f"（日終了時に未完了の行動が残った、その日は {state.steps_today} ステップ）",
+                    team_id=team.team_id,
+                    agent_id=agent.agent_id,
+                )
+            if agent.plan_cursor < len(agent.plan):
+                raise PlanError(
+                    f"行動計画のステップ合計がその日のステップ数を超えています"
+                    f"（{len(agent.plan) - agent.plan_cursor} 個のコマンドが未消化のまま日が終わった、"
+                    f"その日は {state.steps_today} ステップ）",
+                    team_id=team.team_id,
+                    agent_id=agent.agent_id,
+                )
+
     for team in state.teams:
         team.daily_brand_counts.append(len(team.brands_today))
     state.traffic.shift_days()
@@ -376,17 +415,15 @@ def set_plans(state: GameState, plans_by_team: dict[int, TeamPlan]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def simulate_day_steps(
-    state: GameState, tracer: Tracer | None = None, *, strict: bool = True
-) -> None:
+def simulate_day_steps(state: GameState, tracer: Tracer | None = None) -> None:
     """begin_day と set_plans が済んだ状態で、その日の全ステップを進める。"""
     n = state.steps_today
     for step in range(n + 1):
         state.step = step
         if step > 0:
-            reflection_phase(state, tracer, strict=strict)
+            reflection_phase(state, tracer)
         if step < n:
-            action_phase(state, tracer, strict=strict)
+            action_phase(state, tracer)
 
 
 def run_day(
@@ -441,7 +478,7 @@ def run_day_body(
             tracer.plan_rejected(state, team, error)
 
     set_plans(state, effective)
-    simulate_day_steps(state, tracer, strict=False)
+    simulate_day_steps(state, tracer)
     end_day(state, tracer)
     return results
 

@@ -58,7 +58,7 @@ def run_one_day(state, plans, *, road_status=None, tracer=None):
     if road_status is not None:
         state.traffic.road_status = dict(road_status)
     engine.set_plans(state, {0: plans})
-    engine.simulate_day_steps(state, tracer, strict=True)
+    engine.simulate_day_steps(state, tracer)
     engine.end_day(state, tracer)
     return state
 
@@ -157,12 +157,12 @@ class PhaseBoundaryTest(unittest.TestCase):
         engine.set_plans(state, {0: [[-4]]})
 
         state.step = 0
-        engine.action_phase(state, None, strict=True)
+        engine.action_phase(state, None)
         self.assertEqual(state.teams[0].total_udon, 0, "0ステップ目に獲得してはいけない〔Q7〕")
         self.assertEqual(state.traffic.stay_today, {}, "0ステップ目に交通量を数えてはいけない〔Q27〕")
 
         state.step = 1
-        engine.reflection_phase(state, None, strict=True)
+        engine.reflection_phase(state, None)
         self.assertEqual(state.teams[0].total_udon, 1, "1ステップ目以降は獲得される〔Q7〕")
         self.assertEqual(state.traffic.stay_today, {0: 1})
 
@@ -173,7 +173,7 @@ class PhaseBoundaryTest(unittest.TestCase):
         engine.begin_day(state)
         state.traffic.road_status = {0: RoadStatus.SMOOTH}
         engine.set_plans(state, {0: [[-5]]})
-        engine.simulate_day_steps(state, None, strict=True)
+        engine.simulate_day_steps(state, None)
         # 全滞在数 = エージェント1体 × 5反映
         self.assertEqual(sum(state.traffic.stay_today.values()), 5)
 
@@ -250,7 +250,7 @@ class SpotAcquisitionTest(unittest.TestCase):
         state = build(cells, [0], [0], (4,), spots=spots, num_teams=2)
         engine.begin_day(state)
         engine.set_plans(state, {0: [[2, -2]], 1: [[2, -2]]})
-        engine.simulate_day_steps(state, None, strict=True)
+        engine.simulate_day_steps(state, None)
         for team in state.teams:
             self.assertEqual(team.total_udon, 1, f"チーム{team.team_id} も獲得できる")
             self.assertEqual(team.spot_stocks[1], 0)
@@ -278,6 +278,34 @@ class RefuelTest(unittest.TestCase):
         self.assertEqual(supply.pos, 1)
         self.assertEqual(supply.fuel, 5)
 
+    def test_refuel_on_the_final_step(self) -> None:
+        """その日の最後のステップで同じセルに移動した場合も補給される。〔Q22〕【確定】
+
+        「移動の後に補給が行われるので、最後のステップで補給されます」
+        （〔補足〕巡回車E と補給車A の関係）
+        """
+        cells = [[PLAIN, PLAIN]]
+        state = build(cells, [0, 0], [0, 1], (2,), fuel_limits=5)
+        run_one_day(state, [[2], [2]])  # 平地2ステップ＝最終ステップで到着
+        patrol = state.teams[0].agents[0]
+        self.assertEqual(patrol.pos, 1)
+        self.assertEqual(patrol.fuel, 5, "最終ステップでも補給される〔Q22〕")
+
+    def test_one_supply_refuels_multiple_patrols(self) -> None:
+        """1台の補給車が同じセルの複数の巡回車に補給できる。〔要項〕【確定】"""
+        cells = [[PLAIN, PLAIN]]
+        state = build(cells, [0, 0, 0], [0, 0, 1], (2,), fuel_limits=5)
+        run_one_day(state, [[2], [2], [2]])
+        fuels = [a.fuel for a in state.teams[0].agents[:2]]
+        self.assertEqual(fuels, [5, 5])
+
+    def test_multiple_supply_vehicles(self) -> None:
+        """補給車が複数いても問題なく補給される。〔要項〕【確定】"""
+        cells = [[PLAIN, PLAIN]]
+        state = build(cells, [0, 0, 0], [0, 1, 1], (2,), fuel_limits=5)
+        run_one_day(state, [[2], [2], [-2]])
+        self.assertEqual(state.teams[0].agents[0].fuel, 5)
+
     def test_no_refuel_when_supply_has_moved_away(self) -> None:
         """補給車を1セル後ろから追走しても補給されない。〔Q22〕【確定】
 
@@ -291,6 +319,44 @@ class RefuelTest(unittest.TestCase):
         self.assertEqual(patrol.pos, 1)
         self.assertEqual(supply.pos, 2)
         self.assertEqual(patrol.fuel, 4, "補給車は先に進んでいるので補給されない")
+
+
+class MovementRuleTest(unittest.TestCase):
+    """移動の基本ルール。〔要項〕【確定】"""
+
+    def test_agents_can_share_a_cell(self) -> None:
+        """他のエージェントが滞在しているセルにも移動できる。〔要項〕【確定】"""
+        cells = [[PLAIN, PLAIN]]
+        state = build(cells, [0, 1], [0, 0], (2,))
+        run_one_day(state, [[2], [-2]])
+        a0, a1 = state.teams[0].agents
+        self.assertEqual(a0.pos, 1)
+        self.assertEqual(a1.pos, 1, "同じセルに複数のエージェントが滞在できる")
+
+    def test_agents_of_different_teams_share_a_cell(self) -> None:
+        """他チームのエージェントとも同じセルに滞在できる（初期位置は全チーム共通〔Q38〕）。"""
+        cells = [[PLAIN, PLAIN]]
+        state = build(cells, [0], [0], (2,), num_teams=2)
+        engine.begin_day(state)
+        engine.set_plans(state, {0: [[2]], 1: [[2]]})
+        engine.simulate_day_steps(state, None)
+        self.assertEqual(state.teams[0].agents[0].pos, state.teams[1].agents[0].pos)
+
+
+class InputGuardTest(unittest.TestCase):
+    """公式仕様上あり得ない入力を黙って受け入れないこと。"""
+
+    def test_duplicate_spot_on_one_cell_is_rejected(self) -> None:
+        """1セルに複数スポットは存在しない。〔Q18〕〔Q34〕【確定】
+
+        黙って片方を捨てると結果が静かに狂うため、入力段階で弾く。
+        """
+        with self.assertRaises(ValueError) as cm:
+            build(
+                [[PLAIN, PLAIN]], [0], [0], (2,),
+                spots=[SpotDef(pos=1, brand=0, stocks=3), SpotDef(pos=1, brand=9, stocks=3)],
+            )
+        self.assertIn("1セルに複数のスポット", str(cm.exception))
 
 
 class RejectionTest(unittest.TestCase):

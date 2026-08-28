@@ -40,7 +40,7 @@ def demo_official() -> None:
     engine.begin_day(state, tracer)
     scenarios.apply_supplement_road_status(state)
     engine.set_plans(state, {0: plans})
-    engine.simulate_day_steps(state, tracer, strict=True)
+    engine.simulate_day_steps(state, tracer)
 
     print("\n--- 追跡ログ（うどん獲得・燃料補給のみ抜粋） ---")
     for e in tracer.events:
