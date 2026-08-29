@@ -113,7 +113,7 @@ def validate_team_plan(
     plans[team.team_id] = [list(p) for p in plan]
     set_plans(probe, plans)
     try:
-        simulate_day_steps(probe, None, strict=True)
+        simulate_day_steps(probe, None)
     except PlanError as exc:
         if exc.team_id is None:
             exc.team_id = team.team_id

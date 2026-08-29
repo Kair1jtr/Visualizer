@@ -39,7 +39,7 @@ def play_day(state, plans_by_team):
     engine.begin_day(state)
     status = dict(state.traffic.road_status)
     engine.set_plans(state, plans_by_team)
-    engine.simulate_day_steps(state, None, strict=True)
+    engine.simulate_day_steps(state, None)
     engine.end_day(state)
     return status
 
@@ -93,7 +93,7 @@ class RoadStatusByDayTest(unittest.TestCase):
         state = build_road_map((4, 4), busy=3, jammed=5, num_teams=2)
         engine.begin_day(state)
         engine.set_plans(state, {0: [[-4]], 1: [[-4]]})
-        engine.simulate_day_steps(state, None, strict=True)
+        engine.simulate_day_steps(state, None)
         engine.end_day(state)
         self.assertEqual(state.traffic.stay_prev1, {0: 8}, "全チーム分を合算して保持する")
 
@@ -163,7 +163,7 @@ class TrafficPropagationTest(unittest.TestCase):
         )
         engine.begin_day(state)
         engine.set_plans(state, {0: [[2, -2]]})  # 平地(2ステップ)でセル1へ
-        engine.simulate_day_steps(state, None, strict=True)
+        engine.simulate_day_steps(state, None)
         # step1 は移動中なので出発セル0、step2〜4 は到着後のセル1
         self.assertEqual(state.traffic.stay_today, {0: 1, 1: 3})
 
@@ -178,7 +178,7 @@ class TrafficDivisionPolicyTest(unittest.TestCase):
         )
         engine.begin_day(state)
         engine.set_plans(state, {t: [[-stay]] for t in range(num_teams)})
-        engine.simulate_day_steps(state, None, strict=True)
+        engine.simulate_day_steps(state, None)
         engine.end_day(state)
         engine.begin_day(state)
         return state.traffic.road_status[0]
@@ -188,8 +188,9 @@ class TrafficDivisionPolicyTest(unittest.TestCase):
 
         policies.py の TrafficDivision の説明に書いた性質を実際に確認する。
         """
+        # stay=0 は day_steps=0（公式範囲外）かつ [-0] が方向コード0の移動になるため除く
         for num_teams in (1, 2, 3):
-            for stay in range(0, 13):
+            for stay in range(1, 13):
                 with self.subTest(num_teams=num_teams, stay=stay):
                     self.assertEqual(
                         self._status_with(TrafficDivision.EXACT, stay, num_teams),
@@ -210,7 +211,7 @@ class TrafficDivisionPolicyTest(unittest.TestCase):
             engine.begin_day(state)
             # チーム0が3ステップ、チーム1が2ステップ滞在してから移動 → 合計5
             engine.set_plans(state, {0: [[-3]], 1: [[-2, 2]]})
-            engine.simulate_day_steps(state, None, strict=True)
+            engine.simulate_day_steps(state, None)
             engine.end_day(state)
             engine.begin_day(state)
             return state.traffic.stay_prev1.get(0), state.traffic.road_status[0]

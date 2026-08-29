@@ -27,7 +27,7 @@ class OfficialSupplementTest(unittest.TestCase):
         engine.begin_day(self.state, self.tracer)
         scenarios.apply_supplement_road_status(self.state)
         engine.set_plans(self.state, {0: plans})
-        engine.simulate_day_steps(self.state, self.tracer, strict=True)
+        engine.simulate_day_steps(self.state, self.tracer)
         self.team = self.state.teams[0]
 
     # ----- 前提（初期状態） -----
@@ -66,14 +66,14 @@ class OfficialSupplementTest(unittest.TestCase):
         for step in range(n + 1):
             state.step = step
             if step > 0:
-                engine.reflection_phase(state, None, strict=True)
+                engine.reflection_phase(state, None)
                 total = sum(state.traffic.stay_today.values())
                 self.assertEqual(
                     total - prev_total, 8, f"step {step} の滞在増分が 8 でない"
                 )
                 prev_total = total
             if step < n:
-                engine.action_phase(state, None, strict=True)
+                engine.action_phase(state, None)
 
     # ----- A-2 / A-5 / A-6: うどん獲得 -----
 
