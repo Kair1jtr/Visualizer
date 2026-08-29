@@ -313,13 +313,16 @@ class SimSpectator:
 
         # ステップ単位の記録。0ステップ目はアクションのみ、最終ステップは反映のみ
         # 〔Q6〕〔補足〕【確定】という境界は engine 側の定義をそのまま使う。
+        # 検証を通った計画（または全員待機のフォールバック）しか渡していないので、
+        # engine が不正を検出することはない。もし出たら実装の食い違いなので
+        # 握りつぶさず、そのまま例外を上げる。
         steps: list[dict] = []
         for step in range(num_steps + 1):
             state.step = step
             if step > 0:
-                engine.reflection_phase(state, None, strict=False)
+                engine.reflection_phase(state)
             if step < num_steps:
-                engine.action_phase(state, None, strict=False)
+                engine.action_phase(state)
             steps.append({"step": step, "agentsByTeam": _agents_payload(state)})
 
         stay = dict(state.traffic.stay_today)
