@@ -19,14 +19,6 @@
         </p>
       </div>
       <div class="app-actions">
-        <label class="sim-field">
-          戦略
-          <select id="sim-strategy">
-            <option value="greedy">全チーム 貪欲法</option>
-            <option value="greedy,stay">P0 貪欲法 / P1 待機</option>
-            <option value="stay">全チーム 待機</option>
-          </select>
-        </label>
         <button id="btn-start" class="btn btn-primary">実行</button>
         <button id="btn-stop" class="btn" disabled>結果を破棄</button>
         <a class="btn" href="./">本番試合観戦</a>
@@ -72,6 +64,12 @@
       </section>
 
       <aside class="side-panel">
+        <section class="panel-block">
+          <h2>戦略の割り当て</h2>
+          <p class="hint">プレイヤーのボタンを押すと設定画面が開きます。戦略とそのパラメータを決めて「実行」を押してください。</p>
+          <div id="strategy-panel"><p class="muted">読み込み中…</p></div>
+        </section>
+
         <section class="panel-block">
           <h2>チーム</h2>
           <p class="hint">クリックすると下の「実測経路」欄の対象チームが切り替わります。</p>
@@ -120,6 +118,25 @@
       </p>
     </footer>
   </div>
+
+  <dialog id="strategy-dialog" class="strategy-dialog">
+    <div class="dialog-head">
+      <h2 id="dialog-title">戦略の設定</h2>
+      <button type="button" id="dialog-close" class="btn btn-icon" title="閉じる">✕</button>
+    </div>
+    <label class="dialog-field">
+      <span>戦略</span>
+      <select id="dialog-strategy"></select>
+    </label>
+    <p id="dialog-desc" class="muted"></p>
+    <div id="dialog-params" class="dialog-params"></div>
+    <div class="dialog-actions">
+      <button type="button" id="dialog-reset" class="btn">既定に戻す</button>
+      <span class="dialog-spacer"></span>
+      <button type="button" id="dialog-cancel" class="btn">キャンセル</button>
+      <button type="button" id="dialog-apply" class="btn btn-primary">適用</button>
+    </div>
+  </dialog>
 
   <script type="module" src="./js/simmatch.js"></script>
 </body>

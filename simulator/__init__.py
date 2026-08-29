@@ -50,7 +50,21 @@ from .state import (
     TeamState,
     TrafficState,
 )
-from .strategy import STRATEGIES, greedy_team_plan, stay_team_plan
+from .strategy import (
+    DEFAULT_STRATEGY,
+    STRATEGIES,
+    STRATEGY_CLASSES,
+    Param,
+    SpotScoreStrategy,
+    Strategy,
+    StrategyError,
+    create,
+    greedy_team_plan,
+    override_defaults,
+    register,
+    schemas,
+    stay_team_plan,
+)
 from .terrain import AgentKind, RoadStatus, Terrain, move_cost
 from .tracing import Tracer, map_ascii, snapshot
 from .validation import validate_all, validate_kinds, validate_team_plan
@@ -74,8 +88,18 @@ __all__ = [
     "directions_from",
     "path_cells",
     "route",
+    "DEFAULT_STRATEGY",
     "STRATEGIES",
+    "STRATEGY_CLASSES",
+    "Param",
+    "SpotScoreStrategy",
+    "Strategy",
+    "StrategyError",
+    "create",
     "greedy_team_plan",
+    "override_defaults",
+    "register",
+    "schemas",
     "stay_team_plan",
     "DEFAULT_POLICIES",
     "AgentOrder",

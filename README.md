@@ -1,7 +1,7 @@
 # ヘキサうどん Visualizer
 
 第37回全国高等専門学校プログラミングコンテスト 競技部門「ヘキサうどん」用の
-ツール一式です。大きく2つの役割があります。
+ツール一式です。役割は2つあります。
 
 1. **本番試合観戦**: 配布された公式簡易サーバー（`procon-server`）をサブ
    プロセスとして起動・停止し、その進行状況（各チームの位置・推定移動軌跡）を
@@ -13,13 +13,8 @@
    シミュレーターは全ステップの状態を保持しているため、軌跡は推定ではなく
    **実測**で、日中の途中経過をステップ単位で再生できます。
 
-> **旧モックサーバー (`/simulator.html`, `/watch.html`, `/api/match` 系) について**:
-> 2 の登場前は、独自エンドポイントのモックサーバーがビジュアライザの
-> バックエンドでした。こちらは公式ルールを完全には再現しておらず
-> （燃料不足の移動を「補給されるまで待機」として実行してしまう。公式は
-> 回答全体をリジェクトする〔要項〕〔Q6〕）、役割は 2 に引き継がれています。
-> 既存の依存があるため削除はしていませんが、**新規の検討には `/sim.html` を
-> 使ってください**。
+競技ルールの実装は `simulator/` の1か所だけです（`docs/ルール説明書.md` の
+公式一次資料に対応）。ブラウザ側も 1・2 で同じ描画コードを使います。
 
 > ルールの概要と API エンドポイント仕様の一覧は [SPEC.md](SPEC.md) にまとめています。
 
@@ -78,7 +73,8 @@ uvicorn app:app --http h11
 
 | メソッド/パス | 内容 |
 |---|---|
-| `POST /api/sim/start?config=<path>&strategy=<name>` | シミュレーターで1試合を実行する。`config` は `procon-server` に渡すのと同じ設定JSON（省略時は配布サンプル）。`strategy` は `greedy` / `stay`、チームごとに変えるならカンマ区切り（例: `greedy,stay`） |
+| `GET /api/sim/strategies?config=<path>` | 選べる戦略と、設定JSON上のプレイヤー一覧。UI はこれでプルダウンを組み立てる |
+| `POST /api/sim/start?config=<path>&strategy=<spec>` | シミュレーターで1試合を実行する。`config` は `procon-server` に渡すのと同じ設定JSON（省略時は配布サンプル） |
 | `POST /api/sim/stop` | 実行結果を破棄する |
 | `GET /api/sim/status` | 観戦データを返す。**`GET /api/real/status` と同じ形** |
 
@@ -95,199 +91,128 @@ uvicorn app:app --http h11
 累積 ③玉数）、道路セルごとの交通量、リジェクト理由、採用中の仮仕様
 （`simulator/policies.py` の U-1／U-3／U-4／U-5／U-6）も表示されます。
 
-行動計画は `simulator/strategy.py` の参照戦略が組み立てます。
+### 戦略のプレイヤーごとの割り当て
+
+行動計画は `simulator/strategy.py` の戦略クラスが組み立てます。**プレイヤーごとに
+戦略とそのパラメータを個別に設定できる**ので、同じ盤面で戦略同士を戦わせたり、
+同じ戦略の重み違いを比べたりできます。
+
+画面右の「戦略の割り当て」欄でプレイヤーのボタンを押すと、ページ遷移なしで
+設定ダイアログが開きます。戦略を選ぶとその戦略のパラメータ欄が入れ替わり、
+数値・スイッチで細かく調整できます（「既定に戻す」で初期値に戻ります）。
 
 | 戦略 | 内容 |
 |---|---|
-| `greedy` | 「まだ取っていない系列 > 今日まだ取っていない系列 > 取得済み系列」の順に価値をつけ、価値÷距離が最大のスポットへ向かう。補給車は最も燃料が少ない巡回車の到達予定地へ向かう |
-| `stay` | 全エージェントがその日ずっと待機（比較の基準線） |
+| `greedy` 貪欲法 | 系列の価値÷距離が最大のスポットへ。既取得系列も玉数のために拾う |
+| `brand` 系列優先 | まだ取っていない系列だけを狙い、既取得系列は無視する |
+| `nearest` 最近傍 | 系列を見ず、ただ近いスポットから順に回る（玉数狙い） |
+| `stay` 待機 | その日ずっと動かない（比較の基準線） |
 
-## シミュレーターAPI（公式フォーマット準拠のモック・旧実装）
+主なパラメータ:
 
-以下は本番の `procon-server` とは無関係の、このアプリ内蔵のモック実装です。
-`/sim.html` の登場前に使っていたもので、**公式ルールを完全には再現して
-いません**（燃料不足の移動を「補給されるまで待機」として実行する）。
-既存の依存があるため残していますが、新規の検討には `/sim.html` を使ってください。
+| パラメータ | 対象 | 内容 |
+|---|---|---|
+| 距離の効き方 | 全戦略 | 大きいほど近場を優先。0 で距離を無視 |
+| 1日に狙うスポット数 | 全戦略 | この数だけ回ったら残りは待機 |
+| スポットを重複して狙わない | 全戦略 | 切ると複数の巡回車が同じスポットへ向かう |
+| 補給車を巡回車に追従させる | 全戦略 | 切ると補給車はその場で待機 |
+| 新規系列 / 本日未取得 / 取得済み の価値 | greedy・brand | 勝敗①②③のどれを重視するかの重みづけ |
+| 在庫の重み | greedy・brand | 在庫が多いスポットを優先する度合い |
 
-| メソッド/パス | 内容 |
-|---|---|
-| `GET /api/match` | **試合開始前のマップ構成フォーマット**（`startsAt` / `daySeconds` / `daySteps` / `map.cells`＝0:平地 1:道路 2:山地 3:池 / `spots{brand,pos,stocks}` / `agents` / `fuelLimits` / `players` / `busyThreshold` / `jammedThreshold`） |
-| `GET /api/match/{day}` | **各日開始時の試合情報フォーマット**（`endsAt` / `day`＝0始まり / `agents{kind,pos,fuel}`＝kind 0:巡回車 1:補給車 / `others{id,agents}` / `traffics{pos,status}`＝status 0:順調 1:混雑 2:渋滞） |
-| `POST /api/agents` | **エージェント種別の回答**（例 `[0,1,0,1]`）を公式仕様どおり検証 |
-| `POST /api/actions?day=N` | **行動計画の回答**を検証（-1以下=待機 / 0〜5=方向。0:左上→時計回り。ステップ合計の一致・池/マップ外への移動を確認） |
-| `POST /api/new?seed=&teams=&days=&agents=&width=&height=` | 新しいサンプル試合を生成 |
-| `POST /api/live/new?seed=&teams=&…` | **ライブ対戦を開始**（チーム0=あなた。既定 teams=1 は他プレイヤー無しの1人プレイ、2以上でAIが加わる。下記） |
-| `GET /api/live` | ライブ対戦の進行状況（状態・受付中の日・暫定順位） |
-| `GET /api/replay` | ビジュアライザ用の試合データ一式（下記） |
+### 自分の戦略を追加する
 
-FastAPI の自動ドキュメントは http://127.0.0.1:8000/docs で確認できます。
+`SpotScoreStrategy` を継承して `score_spot()` を書き、`@register` を付けるだけです。
+`params` に宣言したパラメータは、API のスキーマにも設定ダイアログのフォームにも
+自動で現れます（`app.py` も JavaScript も触る必要はありません）。
 
-## ライブ対戦モード（自作プログラムで対戦）
+```python
+from simulator.strategy import Param, SpotScoreStrategy, register
 
-`POST /api/live/new` で始まるライブ対戦では、`POST /api/actions` が検証だけで
-なく**実際にその日を実行**します。チーム0があなたのプログラムです。既定
-（`teams=1`）では**他チームは一切生成されず**、他プレイヤーとは無関係に
-自分の巡回だけを確認できます。`teams` を2以上にすると内蔵の貪欲AIチームが
-加わり、順位を競う対戦になります。
+@register
+class StockHungry(SpotScoreStrategy):
+    name = "stock"
+    label = "在庫優先"
+    description = "在庫が多いスポットを優先する"
+    params = SpotScoreStrategy.params + (
+        Param("stock_weight", "在庫の重み", "float", 2.0, minimum=0.0, maximum=10.0),
+    )
 
-```
-POST /api/live/new            試合開始（マップ生成）
-GET  /api/match               マップ構成を取得
-POST /api/agents              種別を提出 → 試合開始
-┌─ 日ごとに繰り返し ─────────────────┐
-│ GET  /api/match/{day}        当日の試合情報（位置・燃料・道路状態）│
-│ POST /api/actions?day={day}  行動計画を提出 → その日が実行される  │
-└──────────────────────────────┘
-GET  /api/replay              全記録（ビジュアライザで観戦可能）
+    def score_spot(self, state, team, spot, dist):
+        stock = team.spot_stocks.get(spot.pos, 0)
+        return stock * self.p["stock_weight"] * self._distance_factor(dist)
 ```
 
-- 手順を誤ると `409`（理由付き）、計画が不正だと `422` が返ります。
-- 実行中の燃料切れの移動は「補給されるまで待機」として扱われ、
-  実際に実行された行動が記録されます。
-- 途中経過も「**現在の試合を表示**」ボタンやデバッグ GUI でいつでも確認できます。
-- 対戦クライアントの実装例: `examples/client.py`（通信手順の見本）。
-  ただし削除済みの `algorithm/` に依存しているため、現状そのままでは動かない。
-  行動計画の組み立て方は `simulator/strategy.py`（貪欲法）と
-  `simulator/pathfinding.py`（その日の道路状態を反映した Dijkstra）を参照。
+`score_spot()` の戻り値が大きいスポットから順に回ります（0以下は「狙わない」）。
+歩き方（その日の道路状態でステップ数を数え、燃料が尽きる前に止める）と補給車の
+動きは基底クラスが持つので、通常はこの1メソッドだけで済みます。1日の組み立てごと
+変えたい場合は `plan()` を上書きしてください（`StayStrategy` がその例）。
 
-### 観戦専用ビュー: Watch (`/watch.html`)
-
-`POST /api/new`（や `/api/live/new` の進行）で新しい試合が作られたことを
-ブラウザが自動検知し、**手動操作なしで最初から最後まで自動再生する**
-観戦専用ページです。生成ボタンやアップロードなどの操作系は持ちません。
-
-- 2秒ごとに `GET /api/replay` をポーリングし、`meta.seed` や完了日数の
-  変化から「新しい試合（または進行）」を検知する
-- 検知したら自動で読み込み、最初から自動再生を開始する
-- 試合終了（最終日の最終ステップ）まで進むと自動停止し、
-  「次の試合を待っています…」と表示して次の検知を待つ
-- 別プロセス・別タブ・curl などから `POST /api/new` や
-  ライブ対戦の行動計画提出が行われても、このタブは開いたままで
-  自動的に追従する（複数モニターに出しっぱなしにする観戦用途に向く）
-
-## サーバーデバッグ GUI (`/debug`)
-
-サーバーが内部に保持している試合データと API の入出力を、ブラウザから
-そのまま確認できるデバッグ画面（FastAPI + Jinja2 のサーバーサイド描画）です。
-
-| パス | 内容 |
-|---|---|
-| `GET /debug` | 試合サマリ（seed・チーム・daySteps・閾値など）、マップ SVG、スポット一覧、サーバー計算の最終結果 (`meta.expected`)、再生成フォーム |
-| `GET /debug/day/{n}` | 各日の試合情報（endsAt・道路状態の内訳）、開始時点の盤面 SVG、全チームのエージェント（位置・燃料）と**行動計画のトレース**（ステップ合計が daySteps と一致するかの検算・到達セル） |
-| `GET /debug/requests` | 直近200件の `/api/*` リクエストログ（メソッド・状態・所要時間・リクエスト/レスポンスボディ）。競技クライアントが送った回答と 422 の理由の確認に便利 |
-
-- セルにマウスを乗せると番号・地形・道路状態、エージェントはチーム・種別・燃料を表示します。
-- リクエストログは純 ASGI ミドルウェア（`visualizer/debugview.py`）で記録し、
-  メモリ上（最大200件）にのみ保持します。
-
-## ビジュアライザ用データ形式 (`hexaudon-official-v1`)
-
-`GET /api/replay` と「JSONを読込」ボタンは、公式フォーマットの文書を束ねた
-以下の形式を使います。
-
-```jsonc
-{
-  "format": "hexaudon-official-v1",
-  "meta": {                       // 補助情報（公式フォーマット外）
-    "seed": 42,
-    "teamNames": ["チームA", "チームB", "チームC"],
-    "seriesNames": ["かけ", "ぶっかけ", "釜玉"],
-    "expected": { /* サーバー側シミュレーションの最終スコア（検算用） */ }
-  },
-  "match": { /* 試合開始前のマップ構成フォーマット（公式そのまま） */ },
-  "kinds": [ [0,0,0,1], ... ],    // エージェント種別の回答（公式）×チーム
-  "days": [
-    {
-      "info":  { /* 各日開始時の試合情報フォーマット（公式・チーム0視点） */ },
-      "plans": [ [[3,2,-4], ...], ... ]  // 行動計画の回答（公式）×チーム
-    }
-  ]
-}
-```
-
-ブラウザ側 (`static/js/replay.js`) がこの公式データだけを使って試合を1ステップ
-ずつ再実行し、アニメーション・スコア・イベントを構築します。再生結果は各日の
-`info`（位置・燃料）および `meta.expected`（最終スコア）と突き合わせ、不一致が
-あればコンソールに警告を出します。
-
-## 旧モックが再現している競技ルール
-
-> 公式ルールを忠実に再現しているのは `simulator/` のほうです（`/sim.html`）。
-> ここに挙げるのは旧モック (`visualizer/hexaudon.py`) の再現範囲で、
-> 燃料不足の扱いなど公式と異なる点があります。
-
-- 移動コスト: 平地2/山地3/道路1〜4ステップ（順調・混雑・渋滞）、池は進入不可
-- 燃料: 平地1/山地2/道路2 を**出発セルの地形**で消費（巡回車のみ）
-- 補給: 補給車と同セルに1ステップ以上滞在で満タン（上限 `fuelLimits`）
-- スポット: 1巡回車1スポット1日1玉・チーム独立在庫・毎日 `stocks` まで補充
-- 道路状態: 前日+前々日の全チーム滞在ステップ数÷チーム数を
-  `busyThreshold` / `jammedThreshold` と比較して決定（初日は全て順調）
-- 勝敗: ①種類数 → ②日ごとの種類数の累積 → ③玉数（④回答時間は模擬対象外）
-
-## 旧モックビジュアライザ (`/simulator.html`) の使い方
-
-- **日タブ / スライダー / ▶** で任意の日・ステップへ。Space=再生/停止、←→=1ステップ移動
-- **スコアの行をクリック**すると、盤面のスポット在庫表示がそのチーム視点になります
-- セル・エージェントを**ホバー/クリック**で詳細（地形・コスト・在庫・燃料）
-- ドラッグでパン、ホイール/±ボタンでズーム
-- 「JSONを読込」で `hexaudon-official-v1` 形式のファイルを直接可視化できます
+既存戦略の重みだけを変えた派生を作るなら、`override_defaults()` で既定値を
+差し替えるだけです（`BrandFirstStrategy` が `GreedyStrategy` に対してそうしています）。
 
 ## 構成
 
 ```
-app.py                     FastAPI サーバー（本番観戦API + シミュレーター観戦API
-                           + 旧モックAPI + デバッグGUI + 静的配信）
+app.py                     FastAPI サーバー（本番観戦API + シミュレーター観戦API + 静的配信）
 server/
   簡易サーバー/             配布された procon-server バイナリ（各OS/CPU版）
   試合設定用JSONファイル/   試合設定。procon-server とシミュレーターの
                            両方がこの同じファイルを読む（既定: example.json）
-simulator/                 公式ルール忠実シミュレーター（通信を含まない純粋なロジック）
+  回答システムに関する情報/  公式 API 仕様（OpenAPI）
+simulator/                 公式ルール忠実シミュレーター（通信も描画も含まない純粋なロジック）
   engine.py                反映フェーズ／アクションフェーズ・日・試合の進行
   validation.py            受付時検証（構造 → 歩行 → 燃料 dry-run）
+  state.py                 GameState / TeamState / AgentState / SpotDef / TrafficState
+  actions.py               行動計画の表現と展開
+  terrain.py               地形・道路状態・移動コスト表（〔要項〕表1）
   grid.py                  セル番号・座標・隣接関係（even-r）
   pathfinding.py           その日の道路状態を反映した六角グリッド上の Dijkstra
-  strategy.py              参照戦略（貪欲法／待機）。ルールではなく攻略側の層
+  strategy.py              戦略クラス（Strategy / SpotScoreStrategy と参照実装4種）。
+                           継承して自分の戦略を足せる。ルールではなく攻略側の層
   policies.py              未確定仕様の切り替え（U-1/U-3/U-4/U-5/U-6）
-  （ほか state.py / actions.py / terrain.py / tracing.py / scenarios.py / compare.py）
-visualizer/
+  tracing.py               追跡ログとスナップショット
+  scenarios.py             公式資料に載っている試合設定
+  compare.py               戦略比較の実行基盤
+visualizer/                入出力の層（ルールは持たない）
   procon_process.py        procon-server（配布バイナリ）のサブプロセス起動・停止
   spectator.py             procon-server をポーリングして観戦データを構築
                            （日ごとのスナップショット保持・軌跡のDijkstra推定）
   sim_spectator.py         simulator/ の試合を spectator.py と同じ形の JSON に
                            変換する観戦アダプタ（軌跡は実測・ステップ記録つき）
-  hexgrid.py               六角形グリッド（even-r）座標・方向コード変換（旧モック用）
-  pathfinding.py           地形コスト付き Dijkstra（旧モック用）
-  mapgen.py                マップ自動生成（連結性保証つき、旧モック用）
-  hexaudon.py              旧モックサーバー用: 試合を表す HexaUdon クラス
-                           （公式ルール非準拠。README 冒頭の注記を参照）
-  debugview.py             デバッグ GUI 用: SVG 描画・計画トレース・API ログ記録
-templates/
-  base.html ほか           デバッグ GUI（Jinja2: 概要 / 日別 / リクエストログ）
-tests/                     simulator/ と観戦アダプタのテスト（unittest, 96件）
+  hexgrid.py               六角形グリッド（even-r）座標・方向コード変換
+  pathfinding.py           地形コスト付き Dijkstra（spectator.py の軌跡推定用）
+tests/                     unittest 125件（ルール・交通量・経路探索・戦略・観戦アダプタ）
 examples/
   simulator_demo.py        simulator/ の公式例の再生・戦略比較デモ（CLI）
-  client.py                旧モックのライブ対戦向けサンプルクライアント
 static/
   index.html               本番試合観戦ビュー（procon-serverの起動・停止 + 閲覧、`/`）
   sim.html                 シミュレーター観戦ビュー（`/sim.html`）
   style.css                共通スタイル（ライト/ダーク対応）
   js/matchview.js          観戦ビューの描画本体（index.html と sim.html で共用）
   js/realmatch.js          matchview に /api/real/* を渡すだけの薄い結線
-  js/simmatch.js           matchview に /api/sim/* を渡すだけの薄い結線
+  js/simmatch.js           matchview の結線 + 戦略の設定ダイアログ（スキーマからフォーム生成）
   js/hex.js / js/palette.js  六角形座標計算（even-r）・配色
-  simulator.html / watch.html  旧モック用ビジュアライザ UI（残置）
-  js/main.js / replay.js / render.js / timeline.js / watch.js  旧モック用（残置）
+docs/                      公式一次資料と、そこから起こしたルール説明書・状態設計書
 ```
+
+## テスト
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+`simulator/` は公式Q&A補足資料の状態遷移例（巡回車A〜G＋補給車A、6ステップ）を
+全項目で再現します。詳細は [docs/実装ノート.md](docs/実装ノート.md)。
 
 ## 備考
 
 - 本番試合観戦（`/api/real/*`）は配布済みの `procon-server` バイナリを実際に
-  起動して通信するため、公式APIの挙動をそのまま反映します。
-- シミュレーターAPI（`/api/match` など）はこのアプリ独自のモック実装です。
-  パスは `/api/...` の仮のもので、レスポンス/リクエストの**中身**は公式
-  フォーマット資料に従っていますが、公式サーバーの正式なエンドポイントとは
-  無関係です。
-- シミュレーターの `POST /api/actions` の検証はフォーマット面（要素数・
-  値域・ステップ合計・池/マップ外移動）のみで、燃料切れの判定までは
-  行いません（本番の `procon-server` は燃料不足の移動を不正として
-  リジェクトします。詳細は [docs/model.md](docs/model.md) 参照）。
+  起動して通信するため、公式APIの挙動をそのまま反映します。ただし公式APIは
+  各日開始時のスナップショットしか返さないため、日中の軌跡は推定です。
+- シミュレーター観戦（`/api/sim/*`）は通信を伴わず、`simulator/` の状態遷移を
+  そのまま描画します。公式資料だけでは決まらない項目（セル番号の割り当て、
+  交通量の除算方式など）は `simulator/policies.py` に集約してあり、
+  仕様が確定したらそこだけを変更すれば全体が追随します。
+- 対戦クライアント（自作プログラムを公式簡易サーバーに接続して実際に指すもの）は
+  まだありません。`simulator/strategy.py` の戦略を `server/回答システムに関する情報/`
+  の API に載せる作業が次の一歩になります。

@@ -843,3 +843,153 @@ body {
   white-space: pre-wrap;
   font-variant-numeric: tabular-nums;
 }
+
+.strategy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 0.8rem;
+}
+
+.strategy-row .strategy-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.strategy-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+/* ---- 戦略の設定ダイアログ ---- */
+
+.strategy-dialog {
+  width: min(440px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.strategy-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.strategy-dialog .dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.strategy-dialog h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.dialog-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.dialog-field select {
+  flex: 1 1 auto;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+#dialog-desc {
+  margin: 8px 0 12px;
+  font-size: 0.75rem;
+}
+
+.dialog-params {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.param-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.param-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+}
+
+.param-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.param-head input[type='number'],
+.param-head select {
+  width: 86px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.param-head input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.param-desc {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.dialog-spacer {
+  flex: 1 1 auto;
+}

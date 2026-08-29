@@ -24,7 +24,14 @@ from simulator.actions import TeamPlan
 from simulator.grid import build_grid
 from simulator.policies import DEFAULT_POLICIES, Policies
 from simulator.state import GameState, MatchConfig, SpotDef
-from simulator.strategy import STRATEGIES
+from simulator.strategy import (
+    DEFAULT_STRATEGY,
+    STRATEGY_CLASSES,
+    Strategy,
+    StrategyError,
+    create,
+    schemas,
+)
 from simulator.terrain import AgentKind
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -102,6 +109,115 @@ def default_kinds(num_agents: int) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
+# 戦略のプレイヤーごとの割り当て
+# ---------------------------------------------------------------------------
+
+
+def parse_strategies(spec: str, num_teams: int) -> list[str]:
+    """戦略の指定文字列を、プレイヤー番号順のリストに展開する。
+
+    受け付ける書き方:
+        "greedy"              全プレイヤーに greedy
+        "greedy,stay"         P0=greedy, P1=stay（プレイヤー数と同数を並べる）
+        "1:stay"              P1 だけ stay、残りは既定
+        "greedy,2:stay,3:brand"  既定を greedy にしつつ P2/P3 だけ差し替え
+
+    位置指定（`番号:戦略`）と並べ書きは混ぜられる。並べ書きだけの場合、
+    要素数はプレイヤー数と一致していなければならない。
+    """
+    tokens = [s.strip() for s in spec.split(",") if s.strip()]
+    if not tokens:
+        raise SimSpectatorError("戦略が指定されていません")
+
+    positional: list[str] = []
+    explicit: dict[int, str] = {}
+    for token in tokens:
+        if ":" in token:
+            head, _, name = token.partition(":")
+            try:
+                index = int(head)
+            except ValueError:
+                raise SimSpectatorError(
+                    f"プレイヤー番号が整数ではありません: {token!r}"
+                ) from None
+            if not 0 <= index < num_teams:
+                raise SimSpectatorError(
+                    f"プレイヤー番号が範囲外です: {index}（0〜{num_teams - 1}）"
+                )
+            explicit[index] = _check_strategy(name.strip())
+        else:
+            positional.append(_check_strategy(token))
+
+    if not positional:
+        base = [DEFAULT_STRATEGY] * num_teams
+    elif len(positional) == 1:
+        base = positional * num_teams
+    elif len(positional) == num_teams:
+        base = list(positional)
+    else:
+        raise SimSpectatorError(
+            f"戦略の指定数がプレイヤー数と一致しません: {len(positional)} != {num_teams}"
+        )
+
+    for index, name in explicit.items():
+        base[index] = name
+    return base
+
+
+def _check_strategy(name: str) -> str:
+    if name not in STRATEGY_CLASSES:
+        raise SimSpectatorError(
+            f"未知の戦略です: {name}（選べるのは {sorted(STRATEGY_CLASSES)}）"
+        )
+    return name
+
+
+def build_assignments(
+    num_teams: int,
+    *,
+    spec: str | None = None,
+    players: list[dict] | None = None,
+) -> list[Strategy]:
+    """プレイヤー番号順の戦略インスタンス列を作る。
+
+    `players` はプレイヤーごとの `{"strategy": 名前, "params": {...}}` の配列で、
+    パラメータまで指定できる（ブラウザの設定ダイアログはこちらを送る）。
+    `spec` は文字列だけの簡易指定（CLI・クエリパラメータ用）。
+    両方省略した場合は全プレイヤーが既定の戦略・既定パラメータになる。
+    """
+    if players is not None:
+        if len(players) != num_teams:
+            raise SimSpectatorError(
+                f"プレイヤー設定の数が一致しません: {len(players)} != {num_teams}"
+            )
+        out = []
+        for index, entry in enumerate(players):
+            if not isinstance(entry, dict):
+                raise SimSpectatorError(
+                    f"プレイヤー{index} の設定はオブジェクトである必要があります"
+                )
+            name = _check_strategy(str(entry.get("strategy", DEFAULT_STRATEGY)))
+            params = entry.get("params") or {}
+            if not isinstance(params, dict):
+                raise SimSpectatorError(
+                    f"プレイヤー{index} の params はオブジェクトである必要があります"
+                )
+            try:
+                out.append(create(name, params))
+            except StrategyError as exc:
+                raise SimSpectatorError(f"プレイヤー{index}: {exc}") from exc
+        return out
+
+    names = parse_strategies(spec or DEFAULT_STRATEGY, num_teams)
+    return [create(name) for name in names]
+
+
+def available_strategies() -> list[dict]:
+    """選べる戦略とパラメータの一覧（UI がフォームを組み立てるのに使う）。"""
+    return schemas()
+
+
+# ---------------------------------------------------------------------------
 # 観戦データの生成
 # ---------------------------------------------------------------------------
 
@@ -145,30 +261,17 @@ class SimSpectator:
         state: GameState,
         *,
         team_names: list[str] | None = None,
-        strategy: str = "greedy",
+        strategy: str | None = None,
+        players: list[dict] | None = None,
         run_key: int = 0,
     ):
-        # 戦略はチームごとに変えられる（"greedy,stay" のようにカンマ区切り）。
-        # 1つだけ指定された場合は全チームに同じものを使う。
-        names = [s.strip() for s in strategy.split(",") if s.strip()]
-        if not names:
-            raise SimSpectatorError("戦略が指定されていません")
-        for name in names:
-            if name not in STRATEGIES:
-                raise SimSpectatorError(
-                    f"未知の戦略です: {name}（選べるのは {sorted(STRATEGIES)}）"
-                )
-        if len(names) == 1:
-            names = names * len(state.teams)
-        if len(names) != len(state.teams):
-            raise SimSpectatorError(
-                f"戦略の指定数がチーム数と一致しません: {len(names)} != {len(state.teams)}"
-            )
+        setups = build_assignments(len(state.teams), spec=strategy, players=players)
         self.state = state
-        self.strategy_names = names
-        self.strategy_name = ",".join(names)
+        self.setups = setups
+        self.strategy_names = [s.name for s in setups]
+        self.strategy_name = ",".join(self.strategy_names)
         self.strategies = {
-            team.team_id: STRATEGIES[names[i]] for i, team in enumerate(state.teams)
+            team.team_id: setups[i] for i, team in enumerate(state.teams)
         }
         self.team_names = team_names or [f"Player {t.team_id}" for t in state.teams]
         self.run_key = run_key
@@ -324,6 +427,7 @@ class SimSpectator:
                     "id": t.team_id,
                     "name": self._name(t.team_id),
                     "strategy": self.strategy_names[i],
+                    "params": dict(self.setups[i].p),
                 }
                 for i, t in enumerate(self.state.teams)
             ],
@@ -353,14 +457,23 @@ class SimSpectator:
 def run_simulation(
     config_path: Path = DEFAULT_CONFIG,
     *,
-    strategy: str = "greedy",
+    strategy: str | None = None,
+    players: list[dict] | None = None,
     run_key: int = 0,
     policies: Policies = DEFAULT_POLICIES,
 ) -> SimSpectator:
-    """設定JSONを読み、全日程を走らせた `SimSpectator` を返す。"""
+    """設定JSONを読み、全日程を走らせた `SimSpectator` を返す。
+
+    戦略はプレイヤーごとに指定できる。`players` はパラメータまで含む配列、
+    `strategy` は名前だけの簡易指定。
+    """
     state, names = load_match_config(config_path, policies=policies)
     spectator = SimSpectator(
-        state, team_names=names, strategy=strategy, run_key=run_key
+        state,
+        team_names=names,
+        strategy=strategy,
+        players=players,
+        run_key=run_key,
     )
     spectator.run()
     return spectator

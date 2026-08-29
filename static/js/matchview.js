@@ -10,6 +10,7 @@
 // createMatchView(options) の options:
 //   apiBase        必須。'./api/real' など。start/stop/status を生やす前置き
 //   startQuery     () => string。起動 POST に付けるクエリ（省略可）
+//   startBody      () => object|null。起動 POST の JSON ボディ（省略可）
 //   isRunning      (status) => bool。停止ボタンを有効にするか
 //   emptyMessage   盤面が無いときの案内（DOM 側に書いてあるので通常は不要）
 //   noTrajMessage  (day, status) => string。軌跡が無い日の説明
@@ -45,6 +46,7 @@ export function createMatchView(options) {
     apiBase,
     pollMs = 1500,
     startQuery = () => '',
+    startBody = () => null,
     isRunning = (s) => !!s?.processAlive,
     noTrajMessage = (day) => `${day.day + 1}日目: 軌跡データがありません。`,
     phaseLabel = DEFAULT_PHASE_LABEL,
@@ -665,7 +667,13 @@ export function createMatchView(options) {
   $('btn-start').addEventListener('click', async () => {
     $('btn-start').disabled = true;
     try {
-      const res = await fetch(`${apiBase}/start${startQuery()}`, { method: 'POST' });
+      const payload = startBody();
+      const init = { method: 'POST' };
+      if (payload) {
+        init.headers = { 'Content-Type': 'application/json' };
+        init.body = JSON.stringify(payload);
+      }
+      const res = await fetch(`${apiBase}/start${startQuery()}`, init);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         alert(`起動に失敗しました: ${body.detail ?? res.status}`);

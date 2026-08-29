@@ -12,12 +12,14 @@
 import unittest
 
 from simulator import engine, validation
-from simulator.strategy import greedy_team_plan, stay_team_plan
+from simulator.strategy import STRATEGIES, greedy_team_plan, stay_team_plan
 from visualizer.sim_spectator import (
     DEFAULT_CONFIG,
     SimSpectator,
     SimSpectatorError,
+    available_strategies,
     load_match_config,
+    parse_strategies,
     run_simulation,
 )
 
@@ -38,18 +40,24 @@ SPECTATOR_KEYS = {
 
 
 class TestGreedyStrategy(unittest.TestCase):
-    def test_plans_pass_official_validation_every_day(self):
-        """貪欲法が作る計画は、全日・全チームで受付時検証を通る。"""
-        state, _names = load_match_config(DEFAULT_CONFIG)
-        while not state.finished:
-            engine.begin_day(state)
-            plans = {t.team_id: greedy_team_plan(state, t.team_id) for t in state.teams}
-            errors = validation.validate_all(state, plans)
-            for team_id, error in errors.items():
-                self.assertIsNone(
-                    error, f"{state.day + 1}日目 チーム{team_id} がリジェクトされた: {error}"
-                )
-            engine.run_day_body(state, plans)
+    def test_every_strategy_passes_official_validation_every_day(self):
+        """どの戦略が作る計画も、全日・全チームで受付時検証を通る。"""
+        for name, strategy in STRATEGIES.items():
+            with self.subTest(strategy=name):
+                state, _names = load_match_config(DEFAULT_CONFIG)
+                while not state.finished:
+                    engine.begin_day(state)
+                    plans = {
+                        t.team_id: strategy(state, t.team_id) for t in state.teams
+                    }
+                    errors = validation.validate_all(state, plans)
+                    for team_id, error in errors.items():
+                        self.assertIsNone(
+                            error,
+                            f"{name}: {state.day + 1}日目 チーム{team_id} が"
+                            f"リジェクトされた: {error}",
+                        )
+                    engine.run_day_body(state, plans)
 
     def test_plan_step_total_matches_day_steps(self):
         """行動計画は1日のステップ数と一致する必要がある〔書式〕【確定】。"""
@@ -170,13 +178,59 @@ class TestSimSpectator(unittest.TestCase):
             self.assertTrue(all(v is None for v in day["rejected"].values()))
 
 
+class TestPerPlayerStrategies(unittest.TestCase):
+    """プレイヤーごとの戦略割り当て（`parse_strategies`）。"""
+
+    def test_single_name_applies_to_everyone(self):
+        self.assertEqual(parse_strategies("greedy", 3), ["greedy"] * 3)
+
+    def test_positional_list_maps_in_order(self):
+        self.assertEqual(
+            parse_strategies("greedy,stay,brand", 3), ["greedy", "stay", "brand"]
+        )
+
+    def test_indexed_form_overrides_only_that_player(self):
+        self.assertEqual(
+            parse_strategies("1:stay", 3), ["greedy", "stay", "greedy"]
+        )
+
+    def test_positional_and_indexed_can_be_mixed(self):
+        self.assertEqual(
+            parse_strategies("nearest,2:stay", 3), ["nearest", "nearest", "stay"]
+        )
+
+    def test_wrong_count_is_rejected(self):
+        with self.assertRaises(SimSpectatorError):
+            parse_strategies("greedy,stay", 3)
+
+    def test_index_out_of_range_is_rejected(self):
+        with self.assertRaises(SimSpectatorError):
+            parse_strategies("5:stay", 3)
+
+    def test_non_integer_index_is_rejected(self):
+        with self.assertRaises(SimSpectatorError):
+            parse_strategies("x:stay", 3)
+
+    def test_available_strategies_covers_the_registry(self):
+        names = [s["name"] for s in available_strategies()]
+        self.assertEqual(set(names), set(STRATEGIES))
+        for entry in available_strategies():
+            self.assertTrue(entry["description"], f"{entry['name']} に説明が無い")
+
+    def test_assigned_strategy_is_reported_per_team(self):
+        summary = run_simulation(strategy="brand,1:stay").summary()
+        self.assertEqual(
+            [t["strategy"] for t in summary["teams"]], ["brand", "stay"]
+        )
+
+
 class TestSimSpectatorErrors(unittest.TestCase):
     def test_unknown_strategy_is_rejected(self):
         state, names = load_match_config(DEFAULT_CONFIG)
         with self.assertRaises(SimSpectatorError):
             SimSpectator(state, team_names=names, strategy="nonexistent")
 
-    def test_strategy_count_must_match_team_count(self):
+    def test_strategy_count_must_match_player_count(self):
         state, names = load_match_config(DEFAULT_CONFIG)
         with self.assertRaises(SimSpectatorError):
             SimSpectator(state, team_names=names, strategy="greedy,stay,greedy")
