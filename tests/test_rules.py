@@ -56,7 +56,7 @@ def run_one_day(state, plans, *, road_status=None, tracer=None):
     """1日を進める（検証済み前提。road_status を与えると道路状態を固定する）。"""
     engine.begin_day(state, tracer)
     if road_status is not None:
-        state.traffic.road_status = dict(road_status)
+        state.traffic.traffics = dict(road_status)
     engine.set_plans(state, {0: plans})
     engine.simulate_day_steps(state, tracer)
     engine.end_day(state, tracer)
@@ -153,7 +153,7 @@ class PhaseBoundaryTest(unittest.TestCase):
         spots = [SpotDef(pos=0, brand=0, stocks=2)]
         state = build(cells, [0], [0], (4,), spots=spots)
         engine.begin_day(state)
-        state.traffic.road_status = {0: RoadStatus.SMOOTH}
+        state.traffic.traffics = {0: RoadStatus.SMOOTH}
         engine.set_plans(state, {0: [[-4]]})
 
         state.step = 0
@@ -171,7 +171,7 @@ class PhaseBoundaryTest(unittest.TestCase):
         cells = [[ROAD, PLAIN]]
         state = build(cells, [0], [0], (5,))
         engine.begin_day(state)
-        state.traffic.road_status = {0: RoadStatus.SMOOTH}
+        state.traffic.traffics = {0: RoadStatus.SMOOTH}
         engine.set_plans(state, {0: [[-5]]})
         engine.simulate_day_steps(state, None)
         # 全滞在数 = エージェント1体 × 5反映
@@ -252,7 +252,7 @@ class SpotAcquisitionTest(unittest.TestCase):
         engine.set_plans(state, {0: [[2, -2]], 1: [[2, -2]]})
         engine.simulate_day_steps(state, None)
         for team in state.teams:
-            self.assertEqual(team.total_udon, 1, f"チーム{team.team_id} も獲得できる")
+            self.assertEqual(team.total_udon, 1, f"チーム{team.id} も獲得できる")
             self.assertEqual(team.spot_stocks[1], 0)
 
 
@@ -364,8 +364,8 @@ class RejectionTest(unittest.TestCase):
 
     def _validate(self, state, plans):
         engine.begin_day(state)
-        if state.grid.road_cells():
-            state.traffic.road_status = {c: RoadStatus.SMOOTH for c in state.grid.road_cells()}
+        if state.map.road_cells():
+            state.traffic.traffics = {c: RoadStatus.SMOOTH for c in state.map.road_cells()}
         return validate_team_plan(state, state.teams[0], plans)
 
     def test_move_into_pond_is_rejected(self) -> None:
@@ -524,7 +524,7 @@ class ScoringTest(unittest.TestCase):
         state.teams[0].total_udon = 100
         state.teams[1].brands_all = {0, 1}
         state.teams[1].total_udon = 1
-        self.assertEqual([t.team_id for t in state.ranking()], [1, 0])
+        self.assertEqual([t.id for t in state.ranking()], [1, 0])
 
     def test_ranking_uses_daily_cumulative_second(self) -> None:
         """② 種類数が同じなら日ごとの累積が多い方が上位。〔要項〕【確定】"""
@@ -534,7 +534,7 @@ class ScoringTest(unittest.TestCase):
             t.total_udon = 10
         state.teams[0].daily_brand_counts = [1, 1]
         state.teams[1].daily_brand_counts = [2, 2]
-        self.assertEqual([t.team_id for t in state.ranking()], [1, 0])
+        self.assertEqual([t.id for t in state.ranking()], [1, 0])
 
     def test_ranking_uses_total_udon_third(self) -> None:
         """③ ①②が同じなら玉数が多い方が上位。〔要項〕【確定】"""
@@ -544,7 +544,7 @@ class ScoringTest(unittest.TestCase):
             t.daily_brand_counts = [1]
         state.teams[0].total_udon = 3
         state.teams[1].total_udon = 9
-        self.assertEqual([t.team_id for t in state.ranking()], [1, 0])
+        self.assertEqual([t.id for t in state.ranking()], [1, 0])
 
     def test_ranking_uses_response_time_last(self) -> None:
         """④ ①〜③が同じなら回答時間の累積が少ない方が上位。〔要項〕〔Q56〕【確定】
@@ -558,7 +558,7 @@ class ScoringTest(unittest.TestCase):
             t.total_udon = 5
         state.teams[0].response_time_total = 30.0
         state.teams[1].response_time_total = 10.0
-        self.assertEqual([t.team_id for t in state.ranking()], [1, 0])
+        self.assertEqual([t.id for t in state.ranking()], [1, 0])
 
 
 class KindsValidationTest(unittest.TestCase):

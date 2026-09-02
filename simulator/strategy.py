@@ -43,12 +43,12 @@ from typing import Any, Callable
 
 from .actions import TeamPlan
 from .pathfinding import dijkstra, directions_from
-from .state import AgentState, GameState, SpotDef, TeamState
+from .state import AgentState, HexaUdon, SpotDef, TeamState
 from .terrain import Terrain, move_cost
 
 # 戦略として使えるもの: begin_day 済みの状態とチームIDを受け取り、
 # 1日分の行動計画を返す。`compare.Strategy` と同じ形。
-StrategyFn = Callable[[GameState, int], TeamPlan]
+StrategyFn = Callable[[HexaUdon, int], TeamPlan]
 
 
 class StrategyError(Exception):
@@ -165,9 +165,9 @@ class _Walker:
     または燃料が足りない）。最後に `finish()` で余りを待機で埋める。
     """
 
-    def __init__(self, state: GameState, agent: AgentState, day_steps: int):
-        self.grid = state.grid
-        self.road = state.traffic.road_status
+    def __init__(self, state: HexaUdon, agent: AgentState, day_steps: int):
+        self.map = state.map
+        self.road = state.traffic.traffics
         self.limit = day_steps
         self.pos = agent.pos
         self.fuel = agent.fuel
@@ -176,12 +176,12 @@ class _Walker:
         self.plan: list[int] = []
 
     def emit(self, direction: int) -> bool:
-        terrain = self.grid.terrain_at(self.pos)
+        terrain = self.map.terrain_at(self.pos)
         if terrain == Terrain.POND:
             return False
         steps, fuel = move_cost(terrain, self.road.get(self.pos))
-        target = self.grid.neighbor(self.pos, direction)
-        if target is None or self.grid.terrain_at(target) == Terrain.POND:
+        target = self.map.neighbor(self.pos, direction)
+        if target is None or self.map.terrain_at(target) == Terrain.POND:
             return False
         if self.used + steps > self.limit:
             return False
@@ -211,27 +211,27 @@ class _Walker:
         return self.plan
 
 
-def route_to(state: GameState, start: int, goal: int) -> list[int] | None:
+def route_to(state: HexaUdon, start: int, goal: int) -> list[int] | None:
     """その日の道路状態で `start` → `goal` の最短経路を方向コード列にする。"""
-    _dist, prev = dijkstra(state.grid, state.traffic.road_status, start)
+    _dist, prev = dijkstra(state.map, state.traffic.traffics, start)
     return directions_from(prev, start, goal)
 
 
-def end_position(state: GameState, agent: AgentState, plan: list[int]) -> int:
+def end_position(state: HexaUdon, agent: AgentState, plan: list[int]) -> int:
     """行動計画を歩き切ったときの到達セル（補給車の行き先決めに使う）。"""
     pos = agent.pos
     for value in plan:
         if value < 0:
             continue
-        nxt = state.grid.neighbor(pos, value)
+        nxt = state.map.neighbor(pos, value)
         if nxt is None:
             break
         pos = nxt
     return pos
 
 
-def team_of(state: GameState, team_id: int) -> TeamState:
-    return next(t for t in state.teams if t.team_id == team_id)
+def team_of(state: HexaUdon, team_id: int) -> TeamState:
+    return next(t for t in state.teams if t.id == team_id)
 
 
 # ---------------------------------------------------------------------------
@@ -270,10 +270,10 @@ class Strategy:
 
     # ----- 戦略として呼ばれる入口 -----
 
-    def __call__(self, state: GameState, team_id: int) -> TeamPlan:
+    def __call__(self, state: HexaUdon, team_id: int) -> TeamPlan:
         return self.plan(state, team_id)
 
-    def plan(self, state: GameState, team_id: int) -> TeamPlan:
+    def plan(self, state: HexaUdon, team_id: int) -> TeamPlan:
         raise NotImplementedError
 
     # ----- 記録用 -----
@@ -338,7 +338,7 @@ class SpotScoreStrategy(Strategy):
     # ----- 継承先が実装する部分 -----
 
     def score_spot(
-        self, state: GameState, team: TeamState, spot: SpotDef, dist: int
+        self, state: HexaUdon, team: TeamState, spot: SpotDef, dist: int
     ) -> float:
         """スポットの評価値。大きいほど優先。0以下は「狙わない」。"""
         raise NotImplementedError
@@ -353,7 +353,7 @@ class SpotScoreStrategy(Strategy):
             return 1.0 / dist
         return 1.0 / (dist**power)
 
-    def plan(self, state: GameState, team_id: int) -> TeamPlan:
+    def plan(self, state: HexaUdon, team_id: int) -> TeamPlan:
         team = team_of(state, team_id)
         day_steps = state.steps_today
         plans: dict[int, list[int]] = {}
@@ -376,7 +376,7 @@ class SpotScoreStrategy(Strategy):
 
     def _plan_patrol(
         self,
-        state: GameState,
+        state: HexaUdon,
         team: TeamState,
         agent: AgentState,
         claimed: set[int],
@@ -396,7 +396,7 @@ class SpotScoreStrategy(Strategy):
                 claimed.add(here.pos)
 
         for _ in range(self.p["max_targets"]):
-            dist, prev = dijkstra(state.grid, state.traffic.road_status, walker.pos)
+            dist, prev = dijkstra(state.map, state.traffic.traffics, walker.pos)
             best = None
             best_score = 0.0
             for spot in state.spots:
@@ -426,7 +426,7 @@ class SpotScoreStrategy(Strategy):
 
     def _plan_supply(
         self,
-        state: GameState,
+        state: HexaUdon,
         team: TeamState,
         agent: AgentState,
         patrol_goals: dict[int, int],
@@ -576,7 +576,7 @@ class StayStrategy(Strategy):
     label = "待機"
     description = "その日ずっと動かない（比較の基準線）"
 
-    def plan(self, state: GameState, team_id: int) -> TeamPlan:
+    def plan(self, state: HexaUdon, team_id: int) -> TeamPlan:
         team = team_of(state, team_id)
         return [[-state.steps_today] for _ in team.agents]
 

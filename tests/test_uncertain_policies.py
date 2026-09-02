@@ -252,10 +252,10 @@ class U5AgentOrderTest(unittest.TestCase):
             plan = [[2, 2, -4], [1, -6], [-8]]
             while not state.finished:
                 engine.begin_day(state)
-                engine.run_day_body(state, {t.team_id: [list(p) for p in plan]
+                engine.run_day_body(state, {t.id: [list(p) for p in plan]
                                             for t in state.teams})
             finals.append([
-                (t.team_id, t.total_udon, t.brand_count, t.daily_brand_cumulative,
+                (t.id, t.total_udon, t.brand_count, t.daily_brand_cumulative,
                  tuple((a.pos, a.fuel) for a in t.agents))
                 for t in state.teams
             ])

@@ -23,7 +23,7 @@ from simulator import engine, validation
 from simulator.actions import TeamPlan
 from simulator.grid import build_grid
 from simulator.policies import DEFAULT_POLICIES, Policies
-from simulator.state import GameState, MatchConfig, SpotDef
+from simulator.state import HexaUdon, MatchConfig, SpotDef
 from simulator.strategy import (
     DEFAULT_STRATEGY,
     STRATEGY_CLASSES,
@@ -43,7 +43,7 @@ class SimSpectatorError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# 試合設定JSON（procon-server と同じ形式）→ GameState
+# 試合設定JSON（procon-server と同じ形式）→ HexaUdon
 # ---------------------------------------------------------------------------
 
 
@@ -52,7 +52,7 @@ def load_match_config(
     *,
     kinds_by_team: list[list[int]] | None = None,
     policies: Policies = DEFAULT_POLICIES,
-) -> tuple[GameState, list[str]]:
+) -> tuple[HexaUdon, list[str]]:
     """`server/試合設定用JSONファイル/` と同じ形式の設定JSONから初期状態を作る。
 
     公式簡易サーバーに渡すのと同じファイルをそのまま使えるので、
@@ -76,12 +76,12 @@ def load_match_config(
         ]
         starts = list(problem["agentStarts"])
         config = MatchConfig(
-            day_steps=tuple(problem["daySteps"]),
-            day_seconds=tuple(problem["daySeconds"]),
-            fuel_limits=problem["fuelLimits"],
-            busy_threshold=problem["busyThreshold"],
-            jammed_threshold=problem["jammedThreshold"],
-            num_teams=len(teams_raw),
+            daySteps=tuple(problem["daySteps"]),
+            daySeconds=tuple(problem["daySeconds"]),
+            fuelLimits=problem["fuelLimits"],
+            busyThreshold=problem["busyThreshold"],
+            jammedThreshold=problem["jammedThreshold"],
+            players=len(teams_raw),
             policies=policies,
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -222,21 +222,21 @@ def available_strategies() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _agents_payload(state: GameState) -> dict[int, list[dict]]:
+def _agents_payload(state: HexaUdon) -> dict[int, list[dict]]:
     """`spectator.py` のスナップショットと同じ形（チームID → エージェント配列）。"""
     return {
-        team.team_id: [
+        team.id: [
             {"kind": int(a.kind), "pos": a.pos, "fuel": a.fuel} for a in team.agents
         ]
         for team in state.teams
     }
 
 
-def _traffics_payload(state: GameState) -> list[dict]:
+def _traffics_payload(state: HexaUdon) -> list[dict]:
     """公式の `traffics` と同じ形（道路セルとその状態）。〔書式〕【確定】"""
     return [
         {"pos": cell, "status": int(status)}
-        for cell, status in sorted(state.traffic.road_status.items())
+        for cell, status in sorted(state.traffic.traffics.items())
     ]
 
 
@@ -258,7 +258,7 @@ class SimSpectator:
 
     def __init__(
         self,
-        state: GameState,
+        state: HexaUdon,
         *,
         team_names: list[str] | None = None,
         strategy: str | None = None,
@@ -271,9 +271,9 @@ class SimSpectator:
         self.strategy_names = [s.name for s in setups]
         self.strategy_name = ",".join(self.strategy_names)
         self.strategies = {
-            team.team_id: setups[i] for i, team in enumerate(state.teams)
+            team.id: setups[i] for i, team in enumerate(state.teams)
         }
-        self.team_names = team_names or [f"Player {t.team_id}" for t in state.teams]
+        self.team_names = team_names or [f"Player {t.id}" for t in state.teams]
         self.run_key = run_key
         self.agent_starts = [a.pos for a in state.teams[0].agents] if state.teams else []
         self.kinds = [int(a.kind) for a in state.teams[0].agents] if state.teams else []
@@ -293,15 +293,15 @@ class SimSpectator:
         day = state.day
         num_steps = state.steps_today
 
-        road_status = dict(state.traffic.road_status)
-        volumes = {c: engine.traffic_volume(state, c) for c in road_status}
+        traffics_now = dict(state.traffic.traffics)
+        volumes = {c: engine.traffic_volume(state, c) for c in traffics_now}
         start_agents = _agents_payload(state)
         traffics = _traffics_payload(state)
 
         # 各チームの回答を作り、公式と同じ手順で検証する〔Q6〕【確定】
         plans: dict[int, TeamPlan] = {}
         for team in state.teams:
-            plans[team.team_id] = self.strategies[team.team_id](state, team.team_id)
+            plans[team.id] = self.strategies[team.id](state, team.id)
         errors = validation.validate_all(state, plans)
 
         # 1体でも不正ならそのチームは全員最終ステップまで待機〔書式〕〔Q55〕【確定】
@@ -373,7 +373,7 @@ class SimSpectator:
     def _scores(self) -> list[dict]:
         return [
             {
-                "teamId": t.team_id,
+                "teamId": t.id,
                 "brandCount": t.brand_count,
                 "dailyCumulative": t.daily_brand_cumulative,
                 "totalUdon": t.total_udon,
@@ -387,28 +387,28 @@ class SimSpectator:
     def setting(self) -> dict:
         """公式の「試合開始前のマップ構成フォーマット」と同じ形。〔書式〕【確定】"""
         cfg = self.state.config
-        grid = self.state.grid
+        map_ = self.state.map
         return {
             # 実時間の進行はシミュレーターの対象外なので 0 を入れる。
             # 盤面を作り直すべきかの判定にはこの下の "key" を使う。
             "startsAt": 0,
             "key": f"sim{self.run_key}",
-            "daySeconds": list(cfg.day_seconds),
-            "daySteps": list(cfg.day_steps),
+            "daySeconds": list(cfg.daySeconds),
+            "daySteps": list(cfg.daySteps),
             "map": {
-                "height": grid.height,
-                "width": grid.width,
-                "cells": [[int(t) for t in row] for row in grid.cells],
+                "height": map_.height,
+                "width": map_.width,
+                "cells": [[int(t) for t in row] for row in map_.cells],
             },
             "spots": [
                 {"brand": s.brand, "pos": s.pos, "stocks": s.stocks} for s in self.state.spots
             ],
             "agents": list(self.agent_starts),
             "kinds": list(self.kinds),
-            "fuelLimits": cfg.fuel_limits,
-            "players": cfg.num_teams,
-            "busyThreshold": cfg.busy_threshold,
-            "jammedThreshold": cfg.jammed_threshold,
+            "fuelLimits": cfg.fuelLimits,
+            "players": cfg.players,
+            "busyThreshold": cfg.busyThreshold,
+            "jammedThreshold": cfg.jammedThreshold,
         }
 
     def summary(self) -> dict:
@@ -427,8 +427,8 @@ class SimSpectator:
             "numDays": self.state.config.num_days,
             "teams": [
                 {
-                    "id": t.team_id,
-                    "name": self._name(t.team_id),
+                    "id": t.id,
+                    "name": self._name(t.id),
                     "strategy": self.strategy_names[i],
                     "params": dict(self.setups[i].p),
                 }
@@ -441,8 +441,8 @@ class SimSpectator:
             "policies": self.state.config.policies.describe(),
             "ranking": [
                 {
-                    "teamId": t.team_id,
-                    "name": self._name(t.team_id),
+                    "teamId": t.id,
+                    "name": self._name(t.id),
                     "brandCount": t.brand_count,
                     "dailyCumulative": t.daily_brand_cumulative,
                     "totalUdon": t.total_udon,

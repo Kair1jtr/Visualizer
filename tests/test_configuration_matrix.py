@@ -23,8 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from simulator import compare, engine, scenarios, strategy  # noqa: E402
-from simulator.state import SpotDef  # noqa: E402
+from simulator import compare, engine, mapgen, strategy  # noqa: E402
 from simulator.terrain import Terrain  # noqa: E402
 
 PLAIN, ROAD, MOUNTAIN = int(Terrain.PLAIN), int(Terrain.ROAD), int(Terrain.MOUNTAIN)
@@ -45,27 +44,6 @@ MAP_SIZES = [8, 12, 16, 20, 24, 32]
 NUM_DAYS = 4
 
 
-def make_square_map(n: int) -> list[list[int]]:
-    """n×n の決定的なマップ。池は置かないので必ず連結する。
-
-    中央に縦1本の道路を通し、山地を規則的に散らす。
-    """
-    cells = [[PLAIN] * n for _ in range(n)]
-    mid = n // 2
-    for r in range(n):
-        cells[r][mid] = ROAD
-    for r in range(0, n, 3):
-        for c in range(0, n, 5):
-            if c != mid:
-                cells[r][c] = MOUNTAIN
-    return cells
-
-
-def _plain_cells(cells: list[list[int]]) -> list[int]:
-    n = len(cells[0])
-    return [r * n + c for r, row in enumerate(cells) for c, v in enumerate(row) if v == PLAIN]
-
-
 def make_state(
     size: int,
     num_patrol: int,
@@ -74,36 +52,10 @@ def make_state(
     num_teams: int = 1,
     num_days: int = NUM_DAYS,
 ):
-    """指定のマップサイズ・エージェント構成で初期状態を作る。
-
-    - スポットは平地に置く〔要項〕。数はエージェント数以上にする〔Q15〕
-    - エージェント初期位置はスポットの無い平地〔要項〕、かつ全て異なるセル〔Q37〕
-    - `daySteps` は公式範囲 `W+H 〜 (W+H)×4` の下限に合わせる〔Q20〕
-    """
-    cells = make_square_map(size)
-    plains = _plain_cells(cells)
-    num_agents = num_patrol + num_supply
-
-    num_spots = max(num_agents, 8)
-    spot_cells = plains[:num_spots]
-    start_cells = plains[num_spots:num_spots + num_agents]
-    if len(start_cells) < num_agents:
-        raise ValueError(f"{size}×{size} では平地が足りません")
-
-    spots = [SpotDef(pos=c, brand=i % 4, stocks=2) for i, c in enumerate(spot_cells)]
-    kinds = [0] * num_patrol + [1] * num_supply
-    day_steps = tuple([size * 2] * num_days)  # W+H = size*2（公式範囲の下限）
-
-    return scenarios.minimal_scenario(
-        cells=cells,
-        spots=spots,
-        starts=start_cells,
-        kinds_by_team=[list(kinds) for _ in range(num_teams)],
-        day_steps=day_steps,
-        fuel_limits=size * 2 * 2,  # 1日目ステップ数の2倍（公式は1〜3倍の範囲内）〔Q60〕
-        busy_threshold=3,
-        jammed_threshold=6,
-    )
+    """指定のマップサイズ・エージェント構成で初期状態を作る（`mapgen`に委譲）。"""
+    return mapgen.square_scenario_factory(
+        size, num_patrol, num_supply, num_teams=num_teams, num_days=num_days
+    )()
 
 
 @dataclass
@@ -123,7 +75,7 @@ def run_once(state, strategy_name: str = "greedy") -> RunSummary:
     rejected = 0
     while not state.finished:
         engine.begin_day(state)
-        plans = {t.team_id: fn(state, t.team_id) for t in state.teams}
+        plans = {t.id: fn(state, t.id) for t in state.teams}
         results = engine.run_day_body(state, plans)
         rejected += sum(1 for e in results.values() if e is not None)
     elapsed = (time.perf_counter() - start) * 1000
@@ -189,8 +141,8 @@ class MapSizeTest(unittest.TestCase):
         for size in MAP_SIZES:
             with self.subTest(size=size):
                 state = make_state(size, 3, 1)
-                self.assertEqual(state.grid.height, size)
-                self.assertEqual(state.grid.width, size)
+                self.assertEqual(state.map.height, size)
+                self.assertEqual(state.map.width, size)
                 summary = run_once(state)
                 self.assertEqual(summary.rejected_days, 0, f"{size}×{size} でリジェクト")
 
@@ -204,8 +156,8 @@ class MapSizeTest(unittest.TestCase):
         for size in MAP_SIZES:
             with self.subTest(size=size):
                 state = make_state(size, 3, 1)
-                lo = state.grid.width + state.grid.height
-                for ds in state.config.day_steps:
+                lo = state.map.width + state.map.height
+                for ds in state.config.daySteps:
                     self.assertTrue(lo <= ds <= lo * 4, f"daySteps={ds} が範囲外（{lo}〜{lo*4}）")
 
     def test_only_map_size_changes(self) -> None:
@@ -244,7 +196,7 @@ def print_report() -> None:
     print("  " + "-" * 88)
     for size in MAP_SIZES:
         state = make_state(size, 3, 1)
-        ds = state.config.day_steps[0]
+        ds = state.config.daySteps[0]
         s = run_once(state)
         print(f"  {f'{size}×{size}':<12}{ds:>10}{s.brand_count:>9}{s.daily_cumulative:>8}"
               f"{s.total_udon:>8}{s.rejected_days:>10}{s.elapsed_ms:>8.1f}ms")

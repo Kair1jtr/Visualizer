@@ -3,7 +3,7 @@
 移動に要するステップ数は **移動元セルの地形** で決まる〔要項〕〔Q10〕〔Q25〕【確定】
 ため、辺の重みは「出発セルのコスト」になる（到着セルではない）。
 道路は日ごとに状態が変わり〔要項〕【確定】、状態によってステップ数が変わるので、
-経路探索には必ずその日の `road_status` を渡すこと。
+経路探索には必ずその日の `traffics` を渡すこと。
 
 このモジュールは**ルールを追加しない**。`terrain.move_cost()` と
 `grid.HexGrid.neighbor()` が定めた通りに歩けるかどうかを探索するだけである。
@@ -18,13 +18,13 @@ from .terrain import RoadStatus, Terrain, move_cost
 
 
 def leave_cost(
-    grid: HexGrid, road_status: dict[int, RoadStatus], cell: int
+    grid: HexGrid, traffics: dict[int, RoadStatus], cell: int
 ) -> tuple[int, int] | None:
     """セル `cell` を出発するときの (ステップ数, 消費燃料)。池なら None。
 
     池は進入不可〔要項〕【確定】なので出発地にもなり得ない。
 
-    `road_status` にその道路セルが載っていない場合は順調とみなす。
+    `traffics` にその道路セルが載っていない場合は順調とみなす。
     エンジンは日開始時に全道路セルの状態を決める〔要項〕【確定】ので通常は起きないが、
     経路探索は部分的な道路状態でも呼べるようにしておく（1日目は全て順調
     〔要項〕【確定】なので、未知＝順調は既定として妥当）。
@@ -33,12 +33,12 @@ def leave_cost(
     if terrain == Terrain.POND:
         return None
     if terrain == Terrain.ROAD:
-        return move_cost(terrain, road_status.get(cell, RoadStatus.SMOOTH))
+        return move_cost(terrain, traffics.get(cell, RoadStatus.SMOOTH))
     return move_cost(terrain, None)
 
 
 def dijkstra(
-    grid: HexGrid, road_status: dict[int, RoadStatus], start: int
+    grid: HexGrid, traffics: dict[int, RoadStatus], start: int
 ) -> tuple[dict[int, int], dict[int, tuple[int, int]]]:
     """`start` から各セルへの最短ステップ数を求める。
 
@@ -58,7 +58,7 @@ def dijkstra(
         d, cell = heapq.heappop(queue)
         if d > dist.get(cell, d + 1):
             continue
-        cost = leave_cost(grid, road_status, cell)
+        cost = leave_cost(grid, traffics, cell)
         if cost is None:
             continue
         steps, _fuel = cost
@@ -94,10 +94,10 @@ def directions_from(prev: dict[int, tuple[int, int]], start: int, goal: int) -> 
 
 
 def route(
-    grid: HexGrid, road_status: dict[int, RoadStatus], start: int, goal: int
+    grid: HexGrid, traffics: dict[int, RoadStatus], start: int, goal: int
 ) -> list[int] | None:
     """`start` から `goal` への最短経路を方向コード列で返す。到達不能なら None。"""
-    _dist, prev = dijkstra(grid, road_status, start)
+    _dist, prev = dijkstra(grid, traffics, start)
     return directions_from(prev, start, goal)
 
 

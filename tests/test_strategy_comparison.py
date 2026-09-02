@@ -96,7 +96,7 @@ def round_trip_strategy(directions: list[int]) -> compare.Strategy:
     """その日の道路状態でコストを数えつつ、指定の往復ルートを進む。"""
 
     def strategy(state, team_id):
-        team = next(t for t in state.teams if t.team_id == team_id)
+        team = next(t for t in state.teams if t.id == team_id)
         return [compare.build_plan(state, a, prefix=list(directions)) for a in team.agents]
 
     return strategy
@@ -114,7 +114,7 @@ def run_pattern(label: str, strategy: compare.Strategy) -> PatternResult:
     result = PatternResult(label=label)
     while not state.finished:
         engine.begin_day(state)
-        status = state.traffic.road_status[ROAD_CELL]
+        status = state.traffic.traffics[ROAD_CELL]
         volume = engine.traffic_volume(state, ROAD_CELL)
         day = state.day
         plans = {0: strategy(state, 0)}

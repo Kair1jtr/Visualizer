@@ -43,7 +43,7 @@ from .policies import (
 )
 from .state import (
     AgentState,
-    GameState,
+    HexaUdon,
     MatchConfig,
     ReservedAction,
     SpotDef,
@@ -110,7 +110,7 @@ __all__ = [
     "SecondDayDivisor",
     "TrafficDivision",
     "AgentState",
-    "GameState",
+    "HexaUdon",
     "MatchConfig",
     "ReservedAction",
     "SpotDef",

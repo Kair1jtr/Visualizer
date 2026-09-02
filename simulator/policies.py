@@ -100,7 +100,7 @@ class FuelTiming(Enum):
 
 @dataclass(frozen=True)
 class Policies:
-    """未確定仕様の選択をまとめた設定。GameState から参照される。"""
+    """未確定仕様の選択をまとめた設定。HexaUdon から参照される。"""
 
     cell_indexing: CellIndexing = CellIndexing.ROW_MAJOR
     row_offset: RowOffset = RowOffset.EVEN_RIGHT

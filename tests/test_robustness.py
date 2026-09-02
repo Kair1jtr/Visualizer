@@ -155,7 +155,7 @@ class SimulationInvariantTest(unittest.TestCase):
 
     def _build_valid_plan(self, state, agent, rng):
         """その日の道路状態と燃料を見ながら、実行可能な行動だけを積む。"""
-        grid, road, n = state.grid, state.traffic.road_status, state.steps_today
+        grid, road, n = state.map, state.traffic.traffics, state.steps_today
         pos, fuel, used, plan = agent.pos, agent.fuel, 0, []
         is_patrol = agent.kind == AgentKind.PATROL
         while used < n:
@@ -217,13 +217,13 @@ class SimulationInvariantTest(unittest.TestCase):
                 for a in team.agents:
                     if a.kind == AgentKind.PATROL:
                         self.assertGreaterEqual(a.fuel, 0, f"燃料が負 (seed={seed})")
-                        self.assertLessEqual(a.fuel, state.config.fuel_limits)
+                        self.assertLessEqual(a.fuel, state.config.fuelLimits)
                     else:
                         self.assertEqual(
                             a.fuel, before_fuel[a.agent_id], "補給車の燃料が変化した"
                         )
                     self.assertNotEqual(
-                        state.grid.terrain_at(a.pos), Terrain.POND, "池の上にいる"
+                        state.map.terrain_at(a.pos), Terrain.POND, "池の上にいる"
                     )
                 for s in state.spots:
                     self.assertTrue(0 <= team.spot_stocks[s.pos] <= s.stocks, "在庫が範囲外")

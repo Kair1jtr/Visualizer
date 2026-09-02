@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from .actions import PlanError, TeamPlan, walk_plan
-from .state import GameState, TeamState
+from .state import HexaUdon, TeamState
 from .terrain import AgentKind
 
 
@@ -39,7 +39,7 @@ def validate_kinds(kinds: list[int], num_agents: int) -> PlanError | None:
 
 
 def validate_team_plan(
-    state: GameState, team: TeamState, plan: TeamPlan
+    state: HexaUdon, team: TeamState, plan: TeamPlan
 ) -> PlanError | None:
     """1チーム分の行動計画を検証する。有効なら None、不正なら PlanError を返す。
 
@@ -54,17 +54,17 @@ def validate_team_plan(
     """
     # ---- 1. 構造 ----
     if not isinstance(plan, (list, tuple)):
-        return PlanError("行動計画は配列である必要があります", team_id=team.team_id)
+        return PlanError("行動計画は配列である必要があります", team_id=team.id)
     if len(plan) != len(team.agents):
         return PlanError(
             f"行動計画の要素数がエージェント数と一致しません: {len(plan)} != {len(team.agents)}",
-            team_id=team.team_id,
+            team_id=team.id,
         )
     for agent, agent_plan in zip(team.agents, plan):
         if not isinstance(agent_plan, (list, tuple)):
             return PlanError(
                 "各エージェントの行動計画は配列である必要があります",
-                team_id=team.team_id,
+                team_id=team.id,
                 agent_id=agent.agent_id,
             )
 
@@ -75,12 +75,12 @@ def validate_team_plan(
             walk = walk_plan(
                 list(agent_plan),
                 agent.pos,
-                state.grid,
-                state.traffic.road_status,
+                state.map,
+                state.traffic.traffics,
                 is_patrol=agent.is_patrol,
             )
         except PlanError as exc:
-            exc.team_id = team.team_id
+            exc.team_id = team.id
             exc.agent_id = agent.agent_id
             return exc
 
@@ -93,13 +93,13 @@ def validate_team_plan(
                     f"残りステップ数では完了できない移動です"
                     f"（{over.index}番目の移動が {over.completes_at} ステップ目に完了、"
                     f"その日は {day_steps} ステップ）",
-                    team_id=team.team_id,
+                    team_id=team.id,
                     agent_id=agent.agent_id,
                 )
             return PlanError(
                 f"行動計画のステップ合計がその日のステップ数と一致しません: "
                 f"{total} != {day_steps}",
-                team_id=team.team_id,
+                team_id=team.id,
                 agent_id=agent.agent_id,
             )
 
@@ -110,26 +110,26 @@ def validate_team_plan(
 
     probe = state.clone()
     plans = all_wait_plans(probe)
-    plans[team.team_id] = [list(p) for p in plan]
+    plans[team.id] = [list(p) for p in plan]
     set_plans(probe, plans)
     try:
         simulate_day_steps(probe, None)
     except PlanError as exc:
         if exc.team_id is None:
-            exc.team_id = team.team_id
+            exc.team_id = team.id
         return exc
     return None
 
 
 def validate_all(
-    state: GameState, plans_by_team: dict[int, TeamPlan]
+    state: HexaUdon, plans_by_team: dict[int, TeamPlan]
 ) -> dict[int, PlanError | None]:
     """全チーム分をまとめて検証する。"""
     return {
-        team.team_id: (
-            validate_team_plan(state, team, plans_by_team[team.team_id])
-            if team.team_id in plans_by_team
-            else PlanError("回答が提出されていません", team_id=team.team_id)
+        team.id: (
+            validate_team_plan(state, team, plans_by_team[team.id])
+            if team.id in plans_by_team
+            else PlanError("回答が提出されていません", team_id=team.id)
         )
         for team in state.teams
     }

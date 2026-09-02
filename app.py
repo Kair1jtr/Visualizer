@@ -4,9 +4,13 @@
 ブラウザ側は同じ描画コード（static/js/matchview.js）で表示できる。
 
 - POST /api/real/start   公式配布の簡易サーバー(procon-server)を起動して観戦開始
-- POST /api/real/stop    procon-server を停止
-- GET  /api/real/status  観戦データ（設定・日ごとのスナップショット・推定軌跡）
+                         （players を渡すと、そのプレイヤー分だけ実際に対戦する
+                         クライアントも同時に起動する）
+- POST /api/real/stop    procon-server と、起動していた対戦クライアントを停止
+- GET  /api/real/status  観戦データ（設定・日ごとのスナップショット・軌跡。
+                         対戦クライアントが動いているチームは実測、それ以外は推定）
 - GET  /api/sim/strategies  選べる戦略（パラメータのスキーマ込み）とプレイヤー一覧
+                         （設定JSONが同じなら本番観戦の戦略割り当てにも使う）
 - POST /api/sim/start    公式ルール忠実シミュレーター(simulator/)で1試合を実行
 - POST /api/sim/stop     シミュレーション結果を破棄
 - GET  /api/sim/status   観戦データ（/api/real/status と同じ形。軌跡は実測）
@@ -23,6 +27,7 @@ from threading import Lock
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 
+from visualizer.procon_client import PlayerClient, spawn
 from visualizer.procon_process import DEFAULT_CONFIG, ProconProcess, ProconProcessError
 from visualizer.sim_spectator import DEFAULT_CONFIG as SIM_DEFAULT_CONFIG
 from visualizer.sim_spectator import (
@@ -32,6 +37,7 @@ from visualizer.sim_spectator import (
     load_match_config,
     run_simulation,
 )
+from simulator.strategy import StrategyError, create
 from visualizer.spectator import MatchSpectator
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -43,9 +49,10 @@ app = FastAPI(
 
 _lock = Lock()
 
-# ----- 本番用: 公式配布の簡易サーバー(procon-server)の観戦 -----
+# ----- 本番用: 公式配布の簡易サーバー(procon-server)の起動・観戦・対戦 -----
 _real_process = ProconProcess()
 _real_spectator: MatchSpectator | None = None
+_real_clients: dict[int, PlayerClient] = {}  # チームID(=teams配列の並び順) -> クライアント
 
 # ----- 公式ルール忠実シミュレーター(simulator/)の観戦 -----
 _sim_spectator: SimSpectator | None = None
@@ -57,12 +64,9 @@ _sim_runs = 0  # 実行ごとに増える。盤面を作り直すべきかの判
 # ---------------------------------------------------------------------------
 
 
-def _load_team_names(config_path: Path) -> list[str]:
-    try:
-        data = json.loads(Path(config_path).read_text(encoding="utf-8"))
-        return [t.get("name") or "" for t in data.get("teams", [])]
-    except Exception:
-        return []
+def _load_teams(config_path: Path) -> list[dict]:
+    data = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    return data["teams"]
 
 
 @app.post("/api/real/start")
@@ -71,58 +75,133 @@ def real_start(
         default=str(DEFAULT_CONFIG),
         description="procon-server に渡す試合設定JSONのパス（省略時は配布サンプル）",
     ),
+    body: dict | None = Body(
+        default=None,
+        description=(
+            "プレイヤーごとに対戦クライアントを起動する場合に指定する。"
+            '{"players": [{"strategy": "greedy", "params": {...}}, null]} のように、'
+            "チーム数ぶんの要素を並べる。要素を null にした（または players 自体を"
+            "省略した）プレイヤーは対戦クライアントを起動せず、観戦のみになる"
+            "（実際には別プログラムがそのチームを操作している想定）"
+        ),
+    ),
 ):
-    """公式配布の簡易サーバー(procon-server)を起動し、観戦を開始する。
+    """公式配布の簡易サーバー(procon-server)を起動し、観戦（と、指定があれば対戦）を開始する。
 
     試合の開始・終了はこのプロセスの起動・停止に対応する。procon-server が
     内部で締切・試合開始・各日の進行をすべて管理するため、このAPIは
-    プロセスを立ち上げるだけでよい。
+    プロセスを立ち上げ、必要なら対戦クライアントもバックグラウンドで
+    起動するだけでよい。
     """
-    global _real_spectator
+    global _real_spectator, _real_clients
     with _lock:
         try:
             config_path = Path(config)
             base_url = _real_process.start(config_path=config_path)
         except ProconProcessError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
-        # 観戦には1チーム分のトークンで足りる（GET / の others[] に全チームが載るため）
         try:
-            teams = json.loads(config_path.read_text(encoding="utf-8"))["teams"]
-            token = teams[0]["token"]
+            teams = _load_teams(config_path)
         except Exception as exc:
             _real_process.stop()
             raise HTTPException(
-                status_code=422, detail=f"設定JSONからトークンを読み取れません: {exc}"
+                status_code=422, detail=f"設定JSONを読み取れません: {exc}"
             )
+        if not teams:
+            _real_process.stop()
+            raise HTTPException(status_code=422, detail="設定JSONにチームがありません")
+
+        # 観戦には1チーム分のトークンで足りる（GET / の others[] に全チームが載るため）
         _real_spectator = MatchSpectator(
-            base_url, token, team_names=_load_team_names(config_path)
+            base_url, teams[0]["token"], team_names=[t.get("name") or "" for t in teams]
         )
-    return {"ok": True, "baseUrl": base_url}
+
+        _real_clients = {}
+        players = body.get("players") if isinstance(body, dict) else None
+        if players:
+            if len(players) != len(teams):
+                _real_process.stop()
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"players の数がチーム数と一致しません: {len(players)} != {len(teams)}",
+                )
+            for team_id, (team, entry) in enumerate(zip(teams, players)):
+                if not entry:
+                    continue  # このプレイヤーは対戦クライアントを起動せず観戦のみ
+                try:
+                    strategy = create(str(entry.get("strategy", "")), entry.get("params") or {})
+                except StrategyError as exc:
+                    _real_process.stop()
+                    _real_clients = {}
+                    raise HTTPException(status_code=422, detail=f"プレイヤー{team_id}: {exc}")
+                name = team.get("name") or f"Player {team_id}"
+                client, _thread = spawn(base_url, team["token"], strategy, name=name)
+                _real_clients[team_id] = client
+    return {"ok": True, "baseUrl": base_url, "players": len(_real_clients)}
 
 
 @app.post("/api/real/stop")
 def real_stop():
-    """procon-server を停止する。"""
+    """procon-server と、起動していた対戦クライアントを停止する。"""
+    global _real_clients
     with _lock:
+        for client in _real_clients.values():
+            client.stop()
+        _real_clients = {}
         _real_process.stop()
     return {"ok": True}
 
 
+def _merge_client_info(summary: dict) -> None:
+    """対戦クライアントが動いているチームの情報を観戦データに重ねる。
+
+    - `teams[].strategy` / `.params` に採用中の戦略を追加する
+    - `days[].trajectories[team_id]` を、可能なら推定ではなく実測に差し替える
+      （クライアントは自チームの全ステップの位置を手元で再現しているため。
+      `visualizer/procon_client.py` のモジュールdocstring参照）
+    """
+    if not _real_clients:
+        return
+    for team in summary.get("teams", []):
+        client = _real_clients.get(team["id"])
+        if client is not None:
+            team["strategy"] = client.strategy.name
+            team["params"] = dict(client.strategy.p)
+            team["clientError"] = client.last_error
+
+    exact_by_day: dict[int, dict[int, dict]] = {}
+    for team_id, client in _real_clients.items():
+        for record in client.days:
+            exact_by_day.setdefault(record["day"], {})[team_id] = record
+
+    for day in summary.get("days", []):
+        exact = exact_by_day.get(day["day"])
+        if not exact:
+            continue
+        trajectories = day.get("trajectories") or {}
+        for team_id, record in exact.items():
+            trajectories[team_id] = record["trajectories"][0]
+        day["trajectories"] = trajectories
+
+
 @app.get("/api/real/status")
 def real_status():
-    """観戦データ（設定・日ごとのスナップショット・推定軌跡）を返す。
+    """観戦データ（設定・日ごとのスナップショット・軌跡）を返す。
 
     procon-server が起動していない場合は running: false のみを返す。
     呼び出しごとに procon-server から最新状態を1回取得する（ポーリング用）。
+    対戦クライアントが動いているチームは、軌跡が推定ではなく実測になる。
     """
     with _lock:
         if _real_spectator is None:
             return {"running": False, "started": False}
         _real_spectator.poll()
+        summary = _real_spectator.summary()
+        _merge_client_info(summary)
         return {
             "started": True,
             "processAlive": _real_process.running,
-            **_real_spectator.summary(),
+            **summary,
         }
 
 
@@ -156,7 +235,7 @@ def sim_strategies(
         "strategies": strategies,
         "default": strategies[0]["name"],
         "players": [
-            {"id": team.team_id, "name": names[i] if i < len(names) else f"Player {i}"}
+            {"id": team.id, "name": names[i] if i < len(names) else f"Player {i}"}
             for i, team in enumerate(state.teams)
         ],
     }

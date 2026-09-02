@@ -14,13 +14,13 @@ from typing import Callable
 
 from . import engine
 from .actions import TeamPlan
-from .state import GameState
+from .state import HexaUdon
 from .terrain import ROAD_STATUS_LABEL, RoadStatus
 from .tracing import Tracer
 
 # 戦略: その日の開始状態（begin_day 済み）とチームIDを受け取り、行動計画を返す。
 # 日開始時点の道路状態を見て判断できるようにこの形にしている。
-Strategy = Callable[[GameState, int], TeamPlan]
+Strategy = Callable[[HexaUdon, int], TeamPlan]
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ Strategy = Callable[[GameState, int], TeamPlan]
 
 @dataclass
 class TeamDayScore:
-    team_id: int
+    id: int
     brand_count: int
     daily_cumulative: int
     total_udon: int
@@ -42,16 +42,16 @@ class DayRecord:
     """1日分の記録。日開始時の道路状態と、その日に発生した滞在数を持つ。"""
 
     day: int
-    road_status: dict[int, RoadStatus]
+    traffics: dict[int, RoadStatus]
     volume_used: dict[int, float]  # その日の道路状態を決めた交通量
     stay: dict[int, int]  # その日に発生した滞在数（全チーム合算）
     scores: list[TeamDayScore]
 
     def road_summary(self) -> str:
-        if not self.road_status:
+        if not self.traffics:
             return "（道路なし）"
         return " ".join(
-            f"c{cell}:{ROAD_STATUS_LABEL[st]}" for cell, st in sorted(self.road_status.items())
+            f"c{cell}:{ROAD_STATUS_LABEL[st]}" for cell, st in sorted(self.traffics.items())
         )
 
 
@@ -61,7 +61,7 @@ class RunResult:
 
     label: str
     days: list[DayRecord] = field(default_factory=list)
-    final_state: GameState | None = None
+    final_state: HexaUdon | None = None
     tracer: Tracer | None = None
 
     def final_scores(self) -> list[TeamDayScore]:
@@ -71,7 +71,7 @@ class RunResult:
         if self.final_state is None:
             return None
         ranking = self.final_state.ranking()
-        return ranking[0].team_id if ranking else None
+        return ranking[0].id if ranking else None
 
     def report(self) -> str:
         lines = [f"=== {self.label} ==="]
@@ -85,7 +85,7 @@ class RunResult:
             for s in rec.scores:
                 mark = f"  ※リジェクト: {s.rejected}" if s.rejected else ""
                 lines.append(
-                    f"          T{s.team_id}: 種類{s.brand_count} "
+                    f"          T{s.id}: 種類{s.brand_count} "
                     f"累積{s.daily_cumulative} 玉{s.total_udon}{mark}"
                 )
         return "\n".join(lines)
@@ -97,7 +97,7 @@ class RunResult:
 
 
 def run_with_strategies(
-    state: GameState,
+    state: HexaUdon,
     strategies: dict[int, Strategy],
     *,
     label: str = "run",
@@ -113,8 +113,8 @@ def run_with_strategies(
 
     while not state.finished:
         engine.begin_day(state, tracer)
-        road_status = dict(state.traffic.road_status)
-        volume = {c: engine.traffic_volume(state, c) for c in road_status}
+        traffics = dict(state.traffic.traffics)
+        volume = {c: engine.traffic_volume(state, c) for c in traffics}
 
         plans: dict[int, TeamPlan] = {}
         for team_id, strategy in strategies.items():
@@ -126,16 +126,16 @@ def run_with_strategies(
         result.days.append(
             DayRecord(
                 day=day_index,
-                road_status=road_status,
+                traffics=traffics,
                 volume_used=volume,
                 stay=dict(state.traffic.stay_prev1),  # 直前に shift されている
                 scores=[
                     TeamDayScore(
-                        team_id=t.team_id,
+                        id=t.id,
                         brand_count=t.brand_count,
                         daily_cumulative=t.daily_brand_cumulative,
                         total_udon=t.total_udon,
-                        rejected=str(rejections[t.team_id]) if rejections.get(t.team_id) else None,
+                        rejected=str(rejections[t.id]) if rejections.get(t.id) else None,
                     )
                     for t in state.teams
                 ],
@@ -147,7 +147,7 @@ def run_with_strategies(
 
 
 def compare(
-    make_state: Callable[[], GameState],
+    make_state: Callable[[], HexaUdon],
     variants: dict[str, dict[int, Strategy]],
     *,
     trace: bool = False,
@@ -171,7 +171,7 @@ def comparison_report(results: dict[str, RunResult]) -> str:
 
     lines.append("=== 最終結果の比較 ===")
     header = f"{'パターン':<24}" + "".join(
-        f"{'T' + str(s.team_id):>22}" for s in next(iter(results.values())).final_scores()
+        f"{'T' + str(s.id):>22}" for s in next(iter(results.values())).final_scores()
     )
     lines.append(header)
     for label, result in results.items():
@@ -191,9 +191,9 @@ def comparison_report(results: dict[str, RunResult]) -> str:
 def always_wait() -> Strategy:
     """全エージェントがその日ずっと待機する戦略。比較の基準線に使う。"""
 
-    def strategy(state: GameState, team_id: int) -> TeamPlan:
+    def strategy(state: HexaUdon, team_id: int) -> TeamPlan:
         n = state.steps_today
-        team = next(t for t in state.teams if t.team_id == team_id)
+        team = next(t for t in state.teams if t.id == team_id)
         return [[-n] for _ in team.agents]
 
     return strategy
@@ -202,23 +202,23 @@ def always_wait() -> Strategy:
 def fixed_plans(plans_by_day: list[TeamPlan]) -> Strategy:
     """あらかじめ決めた行動計画を日ごとに返す戦略。"""
 
-    def strategy(state: GameState, team_id: int) -> TeamPlan:
+    def strategy(state: HexaUdon, team_id: int) -> TeamPlan:
         if state.day < len(plans_by_day):
             return [list(p) for p in plans_by_day[state.day]]
         n = state.steps_today
-        team = next(t for t in state.teams if t.team_id == team_id)
+        team = next(t for t in state.teams if t.id == team_id)
         return [[-n] for _ in team.agents]
 
     return strategy
 
 
-def from_callable(fn: Callable[[GameState, int], TeamPlan]) -> Strategy:
+def from_callable(fn: Callable[[HexaUdon, int], TeamPlan]) -> Strategy:
     """任意の関数を戦略として使う（AI を差し込むための入口）。"""
     return fn
 
 
 def build_plan(
-    state: GameState,
+    state: HexaUdon,
     agent,
     prefix: list[int] | None = None,
     cycle: list[int] | None = None,
@@ -233,8 +233,8 @@ def build_plan(
     """
     from .terrain import Terrain, move_cost
 
-    grid = state.grid
-    road = state.traffic.road_status
+    grid = state.map
+    road = state.traffic.traffics
     limit = state.steps_today
 
     pos = agent.pos
@@ -271,13 +271,13 @@ def build_plan(
     return plan
 
 
-def straight_line_directions(state: GameState, start: int, goal: int) -> list[int]:
+def straight_line_directions(state: HexaUdon, start: int, goal: int) -> list[int]:
     """1行マップ用: `start` から `goal` へ左右移動だけで向かう方向列。
 
     デモ・テスト用の簡易ヘルパー。一般のマップには経路探索が別途必要。
     """
-    row_start, col_start = state.grid.to_rc(start)
-    row_goal, col_goal = state.grid.to_rc(goal)
+    row_start, col_start = state.map.to_rc(start)
+    row_goal, col_goal = state.map.to_rc(goal)
     if row_start != row_goal:
         raise ValueError("この補助関数は同じ行の移動にのみ使えます")
     step = 2 if col_goal > col_start else 5  # 2=右, 5=左

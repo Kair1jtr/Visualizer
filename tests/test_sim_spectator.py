@@ -48,7 +48,7 @@ class TestGreedyStrategy(unittest.TestCase):
                 while not state.finished:
                     engine.begin_day(state)
                     plans = {
-                        t.team_id: strategy(state, t.team_id) for t in state.teams
+                        t.id: strategy(state, t.id) for t in state.teams
                     }
                     errors = validation.validate_all(state, plans)
                     for team_id, error in errors.items():
@@ -66,14 +66,14 @@ class TestGreedyStrategy(unittest.TestCase):
         state, _names = load_match_config(DEFAULT_CONFIG)
         engine.begin_day(state)
         team = state.teams[0]
-        plan = greedy_team_plan(state, team.team_id)
+        plan = greedy_team_plan(state, team.id)
         self.assertEqual(len(plan), len(team.agents))
         for agent, agent_plan in zip(team.agents, plan):
             walk = walk_plan(
                 agent_plan,
                 agent.pos,
-                state.grid,
-                state.traffic.road_status,
+                state.map,
+                state.traffic.traffics,
                 is_patrol=agent.is_patrol,
             )
             self.assertEqual(total_steps(walk), state.steps_today)
@@ -148,13 +148,13 @@ class TestSimSpectator(unittest.TestCase):
     def test_trajectory_path_has_no_repeats_or_jumps(self):
         """経路は連続するセル列（同じセルの連続なし・隣接のみ）。"""
         state, _names = load_match_config(DEFAULT_CONFIG)
-        grid = state.grid
+        map_ = state.map
         for day in self.summary["days"]:
             for rows in day["trajectories"].values():
                 for row in rows:
                     for a, b in zip(row["path"], row["path"][1:]):
                         self.assertNotEqual(a, b)
-                        self.assertIn(b, grid.neighbors(a))
+                        self.assertIn(b, map_.neighbors(a))
 
     def test_day_start_snapshot_matches_step_zero(self):
         for day in self.summary["days"]:
@@ -162,7 +162,7 @@ class TestSimSpectator(unittest.TestCase):
 
     def test_traffics_cover_every_road_cell(self):
         state, _names = load_match_config(DEFAULT_CONFIG)
-        roads = set(state.grid.road_cells())
+        roads = set(state.map.road_cells())
         for day in self.summary["days"]:
             self.assertEqual({t["pos"] for t in day["traffics"]}, roads)
             for t in day["traffics"]:

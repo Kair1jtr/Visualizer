@@ -23,7 +23,7 @@ from .grid import HexGrid
 from .policies import AgentOrder, FuelTiming, SecondDayDivisor, TrafficDivision
 from .state import (
     AgentState,
-    GameState,
+    HexaUdon,
     MatchConfig,
     ReservedAction,
     SpotDef,
@@ -58,7 +58,7 @@ def _volume_at_least(total: int, divisor: int, threshold: int, division: Traffic
     raise ValueError(f"未知の除算方式: {division}")
 
 
-def traffic_divisor(state: GameState) -> int:
+def traffic_divisor(state: HexaUdon) -> int:
     """交通量の除数。U-4【未確認】の隔離場所。
 
     〔要項〕の定義は「チーム数で割った値」。2日目は前々日が存在しないが、
@@ -66,40 +66,40 @@ def traffic_divisor(state: GameState) -> int:
     """
     policy = state.config.policies.second_day_divisor
     if policy is SecondDayDivisor.TEAMS:
-        return state.config.num_teams
+        return state.config.players
     # TEAMS_TIMES_DAYS: 参照した日数を掛ける（2日目は1日、3日目以降は2日）
     ref_days = 1 if state.day == 1 else 2
-    return state.config.num_teams * ref_days
+    return state.config.players * ref_days
 
 
-def compute_road_status(state: GameState) -> dict[int, RoadStatus]:
+def compute_road_status(state: HexaUdon) -> dict[int, RoadStatus]:
     """その日の道路状態を決定する。日開始時に1回だけ呼ぶ。〔要項〕【確定】
 
     1日目      : すべて順調
     2日目      : 1日目の交通量のみ
     3日目以降  : 前日 + 前々日の交通量
     """
-    grid = state.grid
+    map_ = state.map
     cfg = state.config
     division = cfg.policies.traffic_division
     status: dict[int, RoadStatus] = {}
 
-    for cell in grid.road_cells():
+    for cell in map_.road_cells():
         if state.day == 0:
             status[cell] = RoadStatus.SMOOTH  # 1日目は全て順調 〔要項〕【確定】
             continue
         total = state.traffic.stay_prev1.get(cell, 0) + state.traffic.stay_prev2.get(cell, 0)
         divisor = traffic_divisor(state)
-        if _volume_at_least(total, divisor, cfg.jammed_threshold, division):
+        if _volume_at_least(total, divisor, cfg.jammedThreshold, division):
             status[cell] = RoadStatus.JAMMED
-        elif _volume_at_least(total, divisor, cfg.busy_threshold, division):
+        elif _volume_at_least(total, divisor, cfg.busyThreshold, division):
             status[cell] = RoadStatus.CONGESTED
         else:
             status[cell] = RoadStatus.SMOOTH
     return status
 
 
-def traffic_volume(state: GameState, cell: int) -> float:
+def traffic_volume(state: HexaUdon, cell: int) -> float:
     """その日の道路状態を決めるのに使われた交通量（表示・検証用の導出値）。
 
     状態としては保持しない（状態設計書 第9.3節）。
@@ -113,7 +113,7 @@ def traffic_volume(state: GameState, cell: int) -> float:
 # ---------------------------------------------------------------------------
 
 
-def ordered_agents(state: GameState) -> list[tuple[TeamState, AgentState]]:
+def ordered_agents(state: HexaUdon) -> list[tuple[TeamState, AgentState]]:
     """反映フェーズでエージェントを処理する順序。U-5【未確認】の隔離場所。
 
     既定はエージェントID昇順（うどん獲得の競合が ID 順である〔Q26〕【確定】に整合）。
@@ -122,8 +122,8 @@ def ordered_agents(state: GameState) -> list[tuple[TeamState, AgentState]]:
     """
     pairs = [(team, agent) for team in state.teams for agent in team.agents]
     if state.config.policies.agent_order is AgentOrder.REVERSED_ID:
-        return sorted(pairs, key=lambda ta: (ta[0].team_id, -ta[1].agent_id))
-    return sorted(pairs, key=lambda ta: (ta[0].team_id, ta[1].agent_id))
+        return sorted(pairs, key=lambda ta: (ta[0].id, -ta[1].agent_id))
+    return sorted(pairs, key=lambda ta: (ta[0].id, ta[1].agent_id))
 
 
 # ---------------------------------------------------------------------------
@@ -154,10 +154,9 @@ class InsufficientFuel(PlanError):
     """燃料が不足する移動。回答全体をリジェクトする。〔要項〕〔Q6〕【確定】"""
 
 
-def reflection_phase(state: GameState, tracer: Tracer | None = None) -> None:
+def reflection_phase(state: HexaUdon, tracer: Tracer | None = None) -> None:
     """反映フェーズ。1〜5 の順序は公式が定めたもので入れ替えてはならない。"""
     cfg = state.config
-    grid = state.grid
     pairs = ordered_agents(state)
 
     # ---- 1. 燃料の消費 〔Q6〕【確定】 ----
@@ -174,7 +173,7 @@ def reflection_phase(state: GameState, tracer: Tracer | None = None) -> None:
             raise InsufficientFuel(
                 f"燃料不足の移動です（セル {agent.pos} から必要燃料 {r.fuel_cost}、"
                 f"保有 {agent.fuel}）",
-                team_id=team.team_id,
+                team_id=team.id,
                 agent_id=agent.agent_id,
             )
         before = agent.fuel
@@ -230,10 +229,10 @@ def reflection_phase(state: GameState, tracer: Tracer | None = None) -> None:
         for agent in team.agents:
             if not agent.is_patrol or agent.pos not in supply_cells:
                 continue
-            if agent.fuel == cfg.fuel_limits:
+            if agent.fuel == cfg.fuelLimits:
                 continue
             before = agent.fuel
-            agent.fuel = cfg.fuel_limits  # 最大積載量まで補給 〔要項〕【確定】
+            agent.fuel = cfg.fuelLimits  # 最大積載量まで補給 〔要項〕【確定】
             if tracer:
                 tracer.refueled(state, team, agent, before, agent.fuel)
 
@@ -251,14 +250,14 @@ def reflection_phase(state: GameState, tracer: Tracer | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def action_phase(state: GameState, tracer: Tracer | None = None) -> None:
+def action_phase(state: HexaUdon, tracer: Tracer | None = None) -> None:
     """アクションフェーズ。次の行動（移動 or 待機）を予約する。〔Q6〕【確定】
 
     移動を予約した時点では燃料を消費しない〔Q6〕【確定】
     （既定 ON_ARRIVAL の場合。U-6 の他の選択肢では挙動が変わる）。
     """
     cfg = state.config
-    grid = state.grid
+    map_ = state.map
     for team, agent in ordered_agents(state):
         if agent.reserved is not None:
             continue  # 移動中／待機中は新たな命令を出せない 〔Q23〕〔Q24〕【確定】
@@ -270,7 +269,7 @@ def action_phase(state: GameState, tracer: Tracer | None = None) -> None:
                 f"行動計画のステップ合計がその日のステップ数に足りません"
                 f"（{state.step} ステップ目で計画を消化しきった、"
                 f"その日は {state.steps_today} ステップ）",
-                team_id=team.team_id,
+                team_id=team.id,
                 agent_id=agent.agent_id,
             )
         value = agent.plan[agent.plan_cursor]
@@ -285,17 +284,17 @@ def action_phase(state: GameState, tracer: Tracer | None = None) -> None:
         if not is_move(value):
             raise PlanError(
                 f"行動計画の値は -1 以下 または 0〜5 です: {value}",
-                team_id=team.team_id,
+                team_id=team.id,
                 agent_id=agent.agent_id,
             )
 
-        terrain = grid.terrain_at(agent.pos)
+        terrain = map_.terrain_at(agent.pos)
         steps, fuel = move_cost(terrain, state.traffic.status_of(agent.pos))
-        target = grid.neighbor(agent.pos, value)
-        if target is None or grid.terrain_at(target) == Terrain.POND:
+        target = map_.neighbor(agent.pos, value)
+        if target is None or map_.terrain_at(target) == Terrain.POND:
             raise PlanError(
                 f"移動できないセルへの移動です（セル {agent.pos} から方向 {value}）",
-                team_id=team.team_id,
+                team_id=team.id,
                 agent_id=agent.agent_id,
             )
         cost = fuel if agent.is_patrol else 0  # 補給車は燃料を使わない 〔要項〕【確定】
@@ -311,7 +310,7 @@ def action_phase(state: GameState, tracer: Tracer | None = None) -> None:
             if agent.fuel < cost:
                 raise InsufficientFuel(
                     f"燃料不足の移動です（セル {agent.pos} から必要燃料 {cost}、保有 {agent.fuel}）",
-                    team_id=team.team_id,
+                    team_id=team.id,
                     agent_id=agent.agent_id,
                 )
             agent.fuel -= cost
@@ -326,10 +325,10 @@ def action_phase(state: GameState, tracer: Tracer | None = None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def begin_day(state: GameState, tracer: Tracer | None = None) -> None:
+def begin_day(state: HexaUdon, tracer: Tracer | None = None) -> None:
     """日開始処理。状態設計書 第11.2節。〔要項〕【確定】"""
     state.step = 0
-    state.traffic.road_status = compute_road_status(state)
+    state.traffic.traffics = compute_road_status(state)
     state.traffic.stay_today = {}
     for team in state.teams:
         # スポット在庫は各日の開始時に最大在庫数まで補充される 〔要項〕【確定】
@@ -344,7 +343,7 @@ def begin_day(state: GameState, tracer: Tracer | None = None) -> None:
         tracer.day_begun(state)
 
 
-def end_day(state: GameState, tracer: Tracer | None = None) -> None:
+def end_day(state: HexaUdon, tracer: Tracer | None = None) -> None:
     """日終了処理。状態設計書 第11.2節。〔要項〕【確定】
 
     事後条件として、各エージェントが行動計画を過不足なく消化したことを確認する。
@@ -363,7 +362,7 @@ def end_day(state: GameState, tracer: Tracer | None = None) -> None:
                 raise PlanError(
                     f"行動計画のステップ合計がその日のステップ数を超えています"
                     f"（日終了時に未完了の行動が残った、その日は {state.steps_today} ステップ）",
-                    team_id=team.team_id,
+                    team_id=team.id,
                     agent_id=agent.agent_id,
                 )
             if agent.plan_cursor < len(agent.plan):
@@ -371,7 +370,7 @@ def end_day(state: GameState, tracer: Tracer | None = None) -> None:
                     f"行動計画のステップ合計がその日のステップ数を超えています"
                     f"（{len(agent.plan) - agent.plan_cursor} 個のコマンドが未消化のまま日が終わった、"
                     f"その日は {state.steps_today} ステップ）",
-                    team_id=team.team_id,
+                    team_id=team.id,
                     agent_id=agent.agent_id,
                 )
 
@@ -385,7 +384,7 @@ def end_day(state: GameState, tracer: Tracer | None = None) -> None:
         state.finished = True
 
 
-def all_wait_plans(state: GameState) -> dict[int, TeamPlan]:
+def all_wait_plans(state: HexaUdon) -> dict[int, TeamPlan]:
     """有効な回答が無かった場合の既定行動。
 
     「各エージェントは前日終了時（初日なら初期位置）のセルで、
@@ -393,15 +392,15 @@ def all_wait_plans(state: GameState) -> dict[int, TeamPlan]:
     """
     n = state.steps_today
     return {
-        team.team_id: [[-n] for _ in team.agents]
+        team.id: [[-n] for _ in team.agents]
         for team in state.teams
     }
 
 
-def set_plans(state: GameState, plans_by_team: dict[int, TeamPlan]) -> None:
+def set_plans(state: HexaUdon, plans_by_team: dict[int, TeamPlan]) -> None:
     """検証済みの行動計画を各エージェントに設定する。"""
     for team in state.teams:
-        plan = plans_by_team.get(team.team_id)
+        plan = plans_by_team.get(team.id)
         if plan is None:
             continue
         for agent, agent_plan in zip(team.agents, plan):
@@ -415,7 +414,7 @@ def set_plans(state: GameState, plans_by_team: dict[int, TeamPlan]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def simulate_day_steps(state: GameState, tracer: Tracer | None = None) -> None:
+def simulate_day_steps(state: HexaUdon, tracer: Tracer | None = None) -> None:
     """begin_day と set_plans が済んだ状態で、その日の全ステップを進める。"""
     n = state.steps_today
     for step in range(n + 1):
@@ -427,7 +426,7 @@ def simulate_day_steps(state: GameState, tracer: Tracer | None = None) -> None:
 
 
 def run_day(
-    state: GameState,
+    state: HexaUdon,
     plans_by_team: dict[int, TeamPlan],
     tracer: Tracer | None = None,
     *,
@@ -444,7 +443,7 @@ def run_day(
 
 
 def run_day_body(
-    state: GameState,
+    state: HexaUdon,
     plans_by_team: dict[int, TeamPlan],
     tracer: Tracer | None = None,
     *,
@@ -462,18 +461,18 @@ def run_day_body(
     fallback = all_wait_plans(state)
 
     for team in state.teams:
-        plan = plans_by_team.get(team.team_id)
+        plan = plans_by_team.get(team.id)
         if plan is None:
-            results[team.team_id] = PlanError("回答が提出されていません", team_id=team.team_id)
-            effective[team.team_id] = fallback[team.team_id]
+            results[team.id] = PlanError("回答が提出されていません", team_id=team.id)
+            effective[team.id] = fallback[team.id]
             continue
         if not validate:
-            results[team.team_id] = None
-            effective[team.team_id] = plan
+            results[team.id] = None
+            effective[team.id] = plan
             continue
         error = validate_team_plan(state, team, plan)
-        results[team.team_id] = error
-        effective[team.team_id] = fallback[team.team_id] if error else plan
+        results[team.id] = error
+        effective[team.id] = fallback[team.id] if error else plan
         if error and tracer:
             tracer.plan_rejected(state, team, error)
 
@@ -484,7 +483,7 @@ def run_day_body(
 
 
 def run_match(
-    state: GameState,
+    state: HexaUdon,
     plans_by_day: list[dict[int, TeamPlan]],
     tracer: Tracer | None = None,
 ) -> list[dict[int, PlanError | None]]:
@@ -502,33 +501,39 @@ def run_match(
 
 
 def create_game(
-    grid: HexGrid,
+    map: HexGrid,
     config: MatchConfig,
     spots: list[SpotDef],
-    agent_starts: list[int],
+    agentStarts: list[int],
     kinds_by_team: list[list[int]],
-) -> GameState:
+) -> HexaUdon:
     """試合開始時の状態を構築する。状態設計書 第2章・第13.1節。
 
     - エージェント初期位置は全チーム共通 〔Q38〕【確定】
     - 1日目の巡回車の燃料は上限と同じ値 〔要項〕【確定】
     - 種別が未提出（None）なら全エージェントが巡回車 〔書式〕〔Q53〕【確定】
+
+    `agentStarts` の名前は、公式の簡易サーバー設定ファイル形式
+    （`試合設定JSONについて.md`）に合わせている。〔書式〕の `agents` は
+    「初期位置一覧」と「日ごとの状態一覧」の両方に使われ、この2つを
+    同じクラスの同じ属性名では区別できないため、公式が実際に使っている
+    別名（`agentStarts`）を借りて衝突を避けている。
     """
-    if len(kinds_by_team) != config.num_teams:
+    if len(kinds_by_team) != config.players:
         raise ValueError(
-            f"種別の指定数がチーム数と一致しません: {len(kinds_by_team)} != {config.num_teams}"
+            f"種別の指定数がチーム数と一致しません: {len(kinds_by_team)} != {config.players}"
         )
     teams: list[TeamState] = []
     for team_id, kinds in enumerate(kinds_by_team):
         if kinds is None:
-            kinds = [int(AgentKind.PATROL)] * len(agent_starts)
-        if len(kinds) != len(agent_starts):
+            kinds = [int(AgentKind.PATROL)] * len(agentStarts)
+        if len(kinds) != len(agentStarts):
             raise ValueError(
                 f"チーム{team_id} の種別要素数がエージェント数と一致しません: "
-                f"{len(kinds)} != {len(agent_starts)}"
+                f"{len(kinds)} != {len(agentStarts)}"
             )
         agents = []
-        for agent_id, (kind, start) in enumerate(zip(kinds, agent_starts)):
+        for agent_id, (kind, start) in enumerate(zip(kinds, agentStarts)):
             if kind not in (0, 1):
                 raise ValueError(f"エージェント種別は 0 か 1 です: {kind}")
             agents.append(
@@ -536,19 +541,19 @@ def create_game(
                     agent_id=agent_id,
                     kind=AgentKind(kind),
                     pos=start,
-                    fuel=config.fuel_limits,  # 1日目は上限と同じ 〔要項〕【確定】
+                    fuel=config.fuelLimits,  # 1日目は上限と同じ 〔要項〕【確定】
                 )
             )
         teams.append(
             TeamState(
-                team_id=team_id,
+                id=team_id,
                 agents=agents,
                 spot_stocks={s.pos: s.stocks for s in spots},
             )
         )
-    return GameState(
+    return HexaUdon(
         config=config,
-        grid=grid,
+        map=map,
         spots=tuple(spots),
         teams=teams,
         traffic=TrafficState(),

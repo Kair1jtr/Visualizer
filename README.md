@@ -34,36 +34,44 @@ uvicorn app:app --http h11
 - シミュレーターで見る場合: http://127.0.0.1:8000/sim.html を開き、
   「実行」を押してください。
 
-## 本番試合観戦 (`/`)
+## 本番試合観戦・対戦 (`/`)
 
 配布物 `server/簡易サーバー/procon-server-*` を、実行中の OS/CPU に合わせて
 このアプリ自身がサブプロセスとして起動・停止します。試合設定は既定で
 `server/試合設定用JSONファイル/example.json` を使用します。
 
+画面右の「戦略の割り当て」でプレイヤーごとに戦略を選ぶと、**実際にその
+戦略で対戦するクライアント**（`visualizer/procon_client.py`）がプレイヤー
+ごとにバックグラウンドで起動します（シミュレーター観戦と同じ戦略・同じ
+設定ダイアログを使う）。何も割り当てなければ、そのプレイヤーは操作されず
+観戦のみになります。
+
 | メソッド/パス | 内容 |
 |---|---|
-| `POST /api/real/start?config=<path>` | `procon-server` を起動（`config` 省略時は配布サンプル）。チーム0のトークンで観戦を開始する |
-| `POST /api/real/stop` | `procon-server` を停止する |
-| `GET /api/real/status` | 観戦データ（試合設定・日ごとのスナップショット・推定移動軌跡）を返す |
+| `POST /api/real/start?config=<path>` | `procon-server` を起動する。ボディに `{"players": [{"strategy": "greedy", "params": {...}}, ...]}` を渡すと、そのプレイヤー分だけ対戦クライアントも起動する（要素を `null` にするとそのプレイヤーは観戦のみ） |
+| `POST /api/real/stop` | `procon-server` と、起動していた対戦クライアントを停止する |
+| `GET /api/real/status` | 観戦データ（試合設定・日ごとのスナップショット・軌跡）を返す |
 
-- トップページ `/` はこれらのポーリングだけで動く**閲覧専用**ページです
-  （試合そのものへの操作はできません。起動・停止ボタンはサブプロセスの
-  管理用）。
 - 公式APIは「自分のチームのトークンで見た自分の位置」と「他チーム全員の
   位置」は各日開始時点のスナップショットとして返しますが、**日中の実際の
-  経路までは提供しません**。このアプリは前日・翌日のスナップショット間を
-  地形・道路状況込みの Dijkstra 最短経路で結び、「推定移動軌跡」として
-  表示します（実際の経路と一致するとは限りません）。
-- 上記の理由により、**試合最終日の移動軌跡は原理上観測できません**
+  経路までは提供しません**。対戦クライアントを割り当てていないチームは、
+  前日・翌日のスナップショット間を地形・道路状況込みの Dijkstra 最短経路で
+  結んだ「推定軌跡」として表示します（実際の経路と一致するとは限りません）。
+- **対戦クライアントを割り当てたチームは軌跡が実測になります。**
+  クライアントは自チームの在庫・獲得系列（チームごとに独立している
+  〔要項〕【確定】）を手元の `simulator.engine` で正確に再現しており、
+  推定ではなく実際に得られる値そのものを記録しているため。
+- 推定側は、**試合最終日の移動軌跡を原理上観測できません**
   （比較対象となる「翌日のスナップショット」が存在しないため）。
-- 右側の「チーム」欄でチームを選ぶと、盤面下の「推測経路」欄にそのチームの
+  実測側（対戦クライアントを割り当てたチーム）にはこの制約はありません。
+- 右側の「チーム」欄でチームを選ぶと、盤面下の「軌跡」欄にそのチームの
   車両（巡回車・補給車）ごとの出発点・到達点・通過セルの座標一覧が表示され、
-  行をクリックするとその車両の推測経路だけが盤面上に半透明でハイライトされます
+  行をクリックするとその車両の軌跡だけが盤面上に半透明でハイライトされます
   （既定では軌跡線は表示されません）。
 - 公式APIは試合終了後、すべてのエンドポイントを `403`（`match has ended`）
   で拒否するため、**最終的なスコアや在庫などの結果は公式APIから一切
-  取得できません**。観戦中に取得できた日ごとのスナップショットのみが
-  `GET /api/real/status` に残り続けます。
+  取得できません**。対戦クライアントを割り当てたチームだけは、手元で
+  再現したスコア・軌跡が `days[]` に残り続けます。
 
 ## シミュレーター観戦 (`/sim.html`)
 
@@ -162,7 +170,8 @@ server/
 simulator/                 公式ルール忠実シミュレーター（通信も描画も含まない純粋なロジック）
   engine.py                反映フェーズ／アクションフェーズ・日・試合の進行
   validation.py            受付時検証（構造 → 歩行 → 燃料 dry-run）
-  state.py                 GameState / TeamState / AgentState / SpotDef / TrafficState
+  state.py                 HexaUdon / TeamState / AgentState / SpotDef / TrafficState
+                           （フィールド名は〔書式〕のJSONキーに合わせている）
   actions.py               行動計画の表現と展開
   terrain.py               地形・道路状態・移動コスト表（〔要項〕表1）
   grid.py                  セル番号・座標・隣接関係（even-r）
@@ -177,20 +186,29 @@ visualizer/                入出力の層（ルールは持たない）
   procon_process.py        procon-server（配布バイナリ）のサブプロセス起動・停止
   spectator.py             procon-server をポーリングして観戦データを構築
                            （日ごとのスナップショット保持・軌跡のDijkstra推定）
+  procon_client.py         procon-server と**実際に対戦する**クライアント。
+                           GET /setting → POST /agent → 毎日 GET / → 戦略で
+                           計画作成 → 検証 → POST / の流れを1チームぶん担う。
+                           自チームの在庫・スコア・全ステップの軌跡を手元の
+                           simulator.engine で正確に再現する（公式APIはこれらを
+                           教えないため）
   sim_spectator.py         simulator/ の試合を spectator.py と同じ形の JSON に
                            変換する観戦アダプタ（軌跡は実測・ステップ記録つき）
   hexgrid.py               六角形グリッド（even-r）座標・方向コード変換
   pathfinding.py           地形コスト付き Dijkstra（spectator.py の軌跡推定用）
-tests/                     unittest 125件（ルール・交通量・経路探索・戦略・観戦アダプタ）
+tests/                     unittest 202件（ルール・交通量・経路探索・戦略・観戦アダプタ・対戦クライアント）
 examples/
   simulator_demo.py        simulator/ の公式例の再生・戦略比較デモ（CLI）
 static/
-  index.html               本番試合観戦ビュー（procon-serverの起動・停止 + 閲覧、`/`）
+  index.html               本番試合観戦・対戦ビュー（procon-serverの起動・停止・
+                           戦略割り当て、`/`）
   sim.html                 シミュレーター観戦ビュー（`/sim.html`）
   style.css                共通スタイル（ライト/ダーク対応）
   js/matchview.js          観戦ビューの描画本体（index.html と sim.html で共用）
-  js/realmatch.js          matchview に /api/real/* を渡すだけの薄い結線
-  js/simmatch.js           matchview の結線 + 戦略の設定ダイアログ（スキーマからフォーム生成）
+  js/strategypanel.js      プレイヤーごとの戦略設定パネル+ダイアログ
+                           （index.html と sim.html で共用。スキーマからフォーム生成）
+  js/realmatch.js          matchview + strategypanel を /api/real/* に繋ぐ薄い結線
+  js/simmatch.js           matchview + strategypanel を /api/sim/* に繋ぐ薄い結線
   js/hex.js / js/palette.js  六角形座標計算（even-r）・配色
 docs/                      公式一次資料と、そこから起こしたルール説明書・状態設計書
 ```

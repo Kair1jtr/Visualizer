@@ -73,7 +73,7 @@ def walk_plan(
     plan: AgentPlan,
     start: int,
     grid: HexGrid,
-    road_status: dict[int, RoadStatus],
+    traffics: dict[int, RoadStatus],
     *,
     is_patrol: bool,
 ) -> list[WalkStep]:
@@ -103,7 +103,7 @@ def walk_plan(
         if terrain == Terrain.POND:
             # 池には進入できないので、池から出発する状況自体が起こり得ない
             raise PlanError(f"池のセル {pos} からは移動できません")
-        steps, fuel = move_cost(terrain, road_status.get(pos))
+        steps, fuel = move_cost(terrain, traffics.get(pos))
         target = grid.neighbor(pos, value)
         if target is None:
             raise PlanError(

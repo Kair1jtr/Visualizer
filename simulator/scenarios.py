@@ -10,7 +10,7 @@ from __future__ import annotations
 from .engine import create_game
 from .grid import build_grid
 from .policies import DEFAULT_POLICIES, Policies
-from .state import GameState, MatchConfig, SpotDef
+from .state import HexaUdon, MatchConfig, SpotDef
 from .terrain import RoadStatus, Terrain
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ SUPPLEMENT_EXPECTED_STAY = {0: 12, 1: 17, 2: 12, 3: 7}
 
 def official_supplement_scenario(
     policies: Policies = DEFAULT_POLICIES,
-) -> tuple[GameState, list[list[int]]]:
+) -> tuple[HexaUdon, list[list[int]]]:
     """〔補足〕の状態遷移例を再現するための初期状態と行動計画を返す。
 
     注意事項（いずれも〔補足〕がそう書いているため、そのまま採用する）:
@@ -75,13 +75,13 @@ def official_supplement_scenario(
         policies=policies,
     )
     config = MatchConfig(
-        day_steps=(SUPPLEMENT_DAY_STEPS,),
-        day_seconds=(60,),  # 〔補足〕に記載なし。状態遷移には影響しない
-        fuel_limits=SUPPLEMENT_FUEL_LIMIT,
+        daySteps=(SUPPLEMENT_DAY_STEPS,),
+        daySeconds=(60,),  # 〔補足〕に記載なし。状態遷移には影響しない
+        fuelLimits=SUPPLEMENT_FUEL_LIMIT,
         # 閾値は〔補足〕に記載がない。この例では道路状態を直接与えるため使われない。
-        busy_threshold=1,
-        jammed_threshold=2,
-        num_teams=1,
+        busyThreshold=1,
+        jammedThreshold=2,
+        players=1,
         policies=policies,
     )
     spots = [SpotDef(pos=2, brand=0, stocks=SUPPLEMENT_SPOT_STOCKS)]
@@ -89,12 +89,12 @@ def official_supplement_scenario(
     return state, [list(p) for p in SUPPLEMENT_PLANS]
 
 
-def apply_supplement_road_status(state: GameState) -> None:
+def apply_supplement_road_status(state: HexaUdon) -> None:
     """〔補足〕が前提として与えている道路状態を設定する。
 
     セル0 = 順調、セル1 = 混雑。`begin_day` の直後に呼ぶ。
     """
-    state.traffic.road_status = {
+    state.traffic.traffics = {
         0: RoadStatus.SMOOTH,
         1: RoadStatus.CONGESTED,
     }
@@ -119,7 +119,7 @@ def format_example_scenario(
     num_teams: int = 2,
     kinds_by_team: list[list[int]] | None = None,
     policies: Policies = DEFAULT_POLICIES,
-) -> GameState:
+) -> HexaUdon:
     """〔書式〕のマップ構成例をそのまま入力にした状態を返す。
 
     注意: 〔書式〕の `fuelLimits: 20` は `daySteps: [50,100,150,200]` に対して
@@ -129,12 +129,12 @@ def format_example_scenario(
     """
     grid = build_grid(8, 8, FORMAT_EXAMPLE_CELLS, policies)
     config = MatchConfig(
-        day_steps=(50, 100, 150, 200),
-        day_seconds=(5, 5, 5, 10),
-        fuel_limits=20,  # 〔Q62〕によりサンプル上の誤り
-        busy_threshold=2,
-        jammed_threshold=4,
-        num_teams=num_teams,
+        daySteps=(50, 100, 150, 200),
+        daySeconds=(5, 5, 5, 10),
+        fuelLimits=20,  # 〔Q62〕によりサンプル上の誤り
+        busyThreshold=2,
+        jammedThreshold=4,
+        players=num_teams,
         policies=policies,
     )
     if kinds_by_team is None:
@@ -160,7 +160,7 @@ def minimal_scenario(
     busy_threshold: int = 1,
     jammed_threshold: int = 2,
     policies: Policies = DEFAULT_POLICIES,
-) -> GameState:
+) -> HexaUdon:
     """ルール単体を切り出して確認するための小さな盤面を作る。
 
     **公式資料に存在しない構成**であり、マップサイズ・エージェント数・日数が
@@ -170,12 +170,12 @@ def minimal_scenario(
     width = len(cells[0]) if cells else 0
     grid = build_grid(height, width, cells, policies)
     config = MatchConfig(
-        day_steps=day_steps,
-        day_seconds=tuple(60 for _ in day_steps),
-        fuel_limits=fuel_limits,
-        busy_threshold=busy_threshold,
-        jammed_threshold=jammed_threshold,
-        num_teams=len(kinds_by_team),
+        daySteps=day_steps,
+        daySeconds=tuple(60 for _ in day_steps),
+        fuelLimits=fuel_limits,
+        busyThreshold=busy_threshold,
+        jammedThreshold=jammed_threshold,
+        players=len(kinds_by_team),
         policies=policies,
     )
     return create_game(grid, config, spots, starts, kinds_by_team)

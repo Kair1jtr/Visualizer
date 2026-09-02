@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .grid import DIRECTION_LABEL
-from .state import AgentState, GameState, SpotDef, TeamState
+from .state import AgentState, HexaUdon, SpotDef, TeamState
 from .terrain import AGENT_KIND_LABEL, ROAD_STATUS_LABEL, TERRAIN_LABEL, Terrain
 
 
@@ -44,7 +44,7 @@ class Tracer:
     enabled: bool = True
     events: list[TraceEvent] = field(default_factory=list)
 
-    def _add(self, state: GameState, phase: str, message: str, team=None, agent=None) -> None:
+    def _add(self, state: HexaUdon, phase: str, message: str, team=None, agent=None) -> None:
         if not self.enabled:
             return
         self.events.append(
@@ -52,7 +52,7 @@ class Tracer:
                 day=state.day,
                 step=state.step,
                 phase=phase,
-                team_id=team.team_id if team is not None else None,
+                team_id=team.id if team is not None else None,
                 agent_id=agent.agent_id if agent is not None else None,
                 message=message,
             )
@@ -60,9 +60,9 @@ class Tracer:
 
     # ----- 日 -----
 
-    def day_begun(self, state: GameState) -> None:
-        jam = sum(1 for s in state.traffic.road_status.values() if s.value == 2)
-        con = sum(1 for s in state.traffic.road_status.values() if s.value == 1)
+    def day_begun(self, state: HexaUdon) -> None:
+        jam = sum(1 for s in state.traffic.traffics.values() if s.value == 2)
+        con = sum(1 for s in state.traffic.traffics.values() if s.value == 1)
         self._add(
             state,
             "day_begin",
@@ -70,14 +70,14 @@ class Tracer:
             f"道路: 混雑{con} 渋滞{jam} / 在庫補充・当日集合リセット",
         )
 
-    def day_ended(self, state: GameState) -> None:
+    def day_ended(self, state: HexaUdon) -> None:
         parts = [
-            f"T{t.team_id}: 種類{t.brand_count} 累積{t.daily_brand_cumulative} 玉{t.total_udon}"
+            f"T{t.id}: 種類{t.brand_count} 累積{t.daily_brand_cumulative} 玉{t.total_udon}"
             for t in state.teams
         ]
         self._add(state, "day_end", f"{state.day + 1}日目終了 " + " | ".join(parts))
 
-    def plan_rejected(self, state: GameState, team: TeamState, error: Exception) -> None:
+    def plan_rejected(self, state: HexaUdon, team: TeamState, error: Exception) -> None:
         self._add(
             state,
             "plan_rejected",
@@ -115,7 +115,7 @@ class Tracer:
             state, "reflection.4_refuel", f"燃料補給 {before}→{after}", team, agent
         )
 
-    def traffic_updated(self, state: GameState) -> None:
+    def traffic_updated(self, state: HexaUdon) -> None:
         if not self.enabled:
             return
         cells = sorted(state.traffic.stay_today.items())
@@ -159,14 +159,14 @@ class Tracer:
 # ---------------------------------------------------------------------------
 
 
-def snapshot(state: GameState) -> str:
+def snapshot(state: HexaUdon) -> str:
     """現在の状態を人が読める形にまとめる。実装指示書 第9章。"""
     lines: list[str] = []
     lines.append(f"=== Day {state.day + 1}/{state.config.num_days}  Step {state.step}/{state.steps_today} ===")
 
     for team in state.teams:
         lines.append(
-            f"[チーム{team.team_id}] 種類数={team.brand_count} "
+            f"[チーム{team.id}] 種類数={team.brand_count} "
             f"日別累積={team.daily_brand_cumulative} 玉数={team.total_udon} "
             f"日別={team.daily_brand_counts}"
         )
@@ -186,9 +186,9 @@ def snapshot(state: GameState) -> str:
         stocks = {c: v for c, v in sorted(team.spot_stocks.items())}
         lines.append(f"   スポット在庫: {stocks}")
 
-    if state.traffic.road_status:
+    if state.traffic.traffics:
         status = {
-            c: ROAD_STATUS_LABEL[s] for c, s in sorted(state.traffic.road_status.items())
+            c: ROAD_STATUS_LABEL[s] for c, s in sorted(state.traffic.traffics.items())
         }
         lines.append(f"道路状態: {status}")
     lines.append(f"当日の滞在数: {dict(sorted(state.traffic.stay_today.items()))}")
@@ -197,13 +197,13 @@ def snapshot(state: GameState) -> str:
     return "\n".join(lines)
 
 
-def map_ascii(state: GameState) -> str:
+def map_ascii(state: HexaUdon) -> str:
     """マップと現在のエージェント位置を簡易表示する。"""
-    grid = state.grid
+    grid = state.map
     occupants: dict[int, list[str]] = {}
     for team in state.teams:
         for agent in team.agents:
-            occupants.setdefault(agent.pos, []).append(f"{team.team_id}{agent.agent_id}")
+            occupants.setdefault(agent.pos, []).append(f"{team.id}{agent.agent_id}")
     spot_cells = {s.pos for s in state.spots}
 
     glyph = {Terrain.PLAIN: "・", Terrain.ROAD: "＝", Terrain.MOUNTAIN: "▲", Terrain.POND: "≈"}

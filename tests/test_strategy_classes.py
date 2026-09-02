@@ -112,7 +112,7 @@ class TestInheritance(unittest.TestCase):
         state, _names = load_match_config(DEFAULT_CONFIG)
         engine.begin_day(state)
         for team in state.teams:
-            plan = strategy(state, team.team_id)
+            plan = strategy(state, team.id)
             self.assertIsNone(validation.validate_team_plan(state, team, plan))
 
     def test_plan_must_be_implemented(self):
@@ -162,7 +162,7 @@ class TestParametersChangeBehaviour(unittest.TestCase):
         state, _names = load_match_config(DEFAULT_CONFIG)
         engine.begin_day(state)
         team = state.teams[0]
-        plan = create("greedy", {"supply_follow": False})(state, team.team_id)
+        plan = create("greedy", {"supply_follow": False})(state, team.id)
         for agent, agent_plan in zip(team.agents, plan):
             if not agent.is_patrol:
                 self.assertEqual(agent_plan, [-state.steps_today])
@@ -171,8 +171,8 @@ class TestParametersChangeBehaviour(unittest.TestCase):
         state, _names = load_match_config(DEFAULT_CONFIG)
         engine.begin_day(state)
         team = state.teams[0]
-        one = create("greedy", {"max_targets": 1})(state, team.team_id)
-        many = create("greedy", {"max_targets": 8})(state, team.team_id)
+        one = create("greedy", {"max_targets": 1})(state, team.id)
+        many = create("greedy", {"max_targets": 8})(state, team.id)
         moves_one = sum(1 for p in one for v in p if v >= 0)
         moves_many = sum(1 for p in many for v in p if v >= 0)
         self.assertLessEqual(moves_one, moves_many)

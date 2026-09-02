@@ -37,7 +37,7 @@ def build_road_map(day_steps, *, busy, jammed, num_teams=1, num_agents=1, polici
 
 def play_day(state, plans_by_team):
     engine.begin_day(state)
-    status = dict(state.traffic.road_status)
+    status = dict(state.traffic.traffics)
     engine.set_plans(state, plans_by_team)
     engine.simulate_day_steps(state, None)
     engine.end_day(state)
@@ -51,7 +51,7 @@ class RoadStatusByDayTest(unittest.TestCase):
         """C-12 1日目の道路状態は全て順調。〔要項〕【確定】"""
         state = build_road_map((4,), busy=1, jammed=2)
         engine.begin_day(state)
-        self.assertEqual(state.traffic.road_status, {0: RoadStatus.SMOOTH})
+        self.assertEqual(state.traffic.traffics, {0: RoadStatus.SMOOTH})
 
     def test_day2_uses_only_day1_traffic(self) -> None:
         """C-13 2日目は1日目の交通量のみで決まる。〔要項〕【確定】"""
@@ -62,7 +62,7 @@ class RoadStatusByDayTest(unittest.TestCase):
 
         engine.begin_day(state)
         # 交通量 = (4 + 0) / 1 = 4 → busy(3) <= 4 < jammed(5) → 混雑
-        self.assertEqual(state.traffic.road_status, {0: RoadStatus.CONGESTED})
+        self.assertEqual(state.traffic.traffics, {0: RoadStatus.CONGESTED})
 
     def test_day3_uses_previous_two_days(self) -> None:
         """3日目以降は前日＋前々日の交通量で決まる。〔要項〕【確定】"""
@@ -71,7 +71,7 @@ class RoadStatusByDayTest(unittest.TestCase):
         play_day(state, {0: [[-4]]})  # 2日目: セル0 に 4
         engine.begin_day(state)
         # 交通量 = (4 + 4) / 1 = 8 >= jammed(5) → 渋滞
-        self.assertEqual(state.traffic.road_status, {0: RoadStatus.JAMMED})
+        self.assertEqual(state.traffic.traffics, {0: RoadStatus.JAMMED})
 
     def test_threshold_boundaries(self) -> None:
         """判定式の境界。交通量 < busy → 順調、busy <= 交通量 < jammed → 混雑、
@@ -82,7 +82,7 @@ class RoadStatusByDayTest(unittest.TestCase):
                 state = build_road_map((stay, 1), busy=3, jammed=5)
                 play_day(state, {0: [[-stay]]})
                 engine.begin_day(state)
-                self.assertEqual(state.traffic.road_status[0], expected)
+                self.assertEqual(state.traffic.traffics[0], expected)
 
     def test_divisor_is_team_count(self) -> None:
         """交通量は全チーム分を合算し、チーム数で割る。〔要項〕【確定】
@@ -99,7 +99,7 @@ class RoadStatusByDayTest(unittest.TestCase):
 
         engine.begin_day(state)
         self.assertEqual(engine.traffic_volume(state, 0), 4.0)
-        self.assertEqual(state.traffic.road_status[0], RoadStatus.CONGESTED)
+        self.assertEqual(state.traffic.traffics[0], RoadStatus.CONGESTED)
 
 
 class TrafficPropagationTest(unittest.TestCase):
@@ -128,7 +128,7 @@ class TrafficPropagationTest(unittest.TestCase):
 
         engine.begin_day(state)
         self.assertEqual(
-            state.traffic.road_status[0], RoadStatus.SMOOTH, "道路を避けたので回復する"
+            state.traffic.traffics[0], RoadStatus.SMOOTH, "道路を避けたので回復する"
         )
 
     def test_avoiding_road_keeps_it_smooth(self) -> None:
@@ -143,7 +143,7 @@ class TrafficPropagationTest(unittest.TestCase):
 
         play_day(state, {0: [[-4]]})  # 2日目: セル1で待機
         engine.begin_day(state)
-        self.assertEqual(state.traffic.road_status[0], RoadStatus.SMOOTH)
+        self.assertEqual(state.traffic.traffics[0], RoadStatus.SMOOTH)
 
     def test_in_transit_agent_counted_at_origin(self) -> None:
         """移動中のエージェントは出発セルに計上される。〔補足〕滞在数【確定】
@@ -181,7 +181,7 @@ class TrafficDivisionPolicyTest(unittest.TestCase):
         engine.simulate_day_steps(state, None)
         engine.end_day(state)
         engine.begin_day(state)
-        return state.traffic.road_status[0]
+        return state.traffic.traffics[0]
 
     def test_exact_and_floor_agree_for_integer_thresholds(self) -> None:
         """閾値が正の整数なので EXACT と FLOOR は必ず一致する。〔Q30〕【確定】
@@ -214,7 +214,7 @@ class TrafficDivisionPolicyTest(unittest.TestCase):
             engine.simulate_day_steps(state, None)
             engine.end_day(state)
             engine.begin_day(state)
-            return state.traffic.stay_prev1.get(0), state.traffic.road_status[0]
+            return state.traffic.stay_prev1.get(0), state.traffic.traffics[0]
 
         total_exact, st_exact = status(policies_exact)
         total_ceil, st_ceil = status(policies_ceil)

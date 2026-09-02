@@ -82,7 +82,7 @@ def run_scenario(
         prev1 = state.traffic.stay_prev1.get(ROAD_CELL, 0)
         prev2 = state.traffic.stay_prev2.get(ROAD_CELL, 0)
         volume = engine.traffic_volume(state, ROAD_CELL)
-        status = state.traffic.road_status[ROAD_CELL]
+        status = state.traffic.traffics[ROAD_CELL]
 
         day = state.day
         plans = plans_by_day[day] if day < len(plans_by_day) else {}
